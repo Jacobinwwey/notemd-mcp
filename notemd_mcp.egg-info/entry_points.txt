@@ -1,0 +1,2 @@
+[console_scripts]
+notemd-mcp = notemd_mcp.main:start_server

@@ -1,0 +1,7 @@
+README.md
+setup.py
+notemd_mcp.egg-info/PKG-INFO
+notemd_mcp.egg-info/SOURCES.txt
+notemd_mcp.egg-info/dependency_links.txt
+notemd_mcp.egg-info/entry_points.txt
+notemd_mcp.egg-info/top_level.txt

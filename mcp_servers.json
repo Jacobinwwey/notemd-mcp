@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "notemd-mcp": {
+      "description": "Notemd MCP Server - AI-powered text processing and knowledge management for your Markdown files.",
+      "command": "npx",
+      "args": [
+        "-y",
+        "notemd-mcp-server"
+      ]
+    }
+  }
+}
