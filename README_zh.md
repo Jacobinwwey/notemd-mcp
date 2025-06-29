@@ -36,6 +36,7 @@
 -   **`main.py` (API 层)**：使用 **FastAPI** 框架定义所有 API 端点。它处理传入的请求，使用 Pydantic 验证数据，并调用核心逻辑层的相应函数。
 -   **`notemd_core.py` (逻辑层)**：应用程序的引擎。它包含了与 LLM 交互、处理文本、执行网络搜索以及在您的知识库中管理文件的所有业务逻辑。
 -   **`config.py` (用户定义空间)**：中央配置中心。您可以在此定义文件路径、API 密钥，并调整服务器的行为以满足您的需求。
+-   **`cli.js` (MCP 桥接)**：一个基于 Node.js 的命令行接口，作为 Python 服务器的桥梁。它使用 `@modelcontextprotocol/sdk` 创建一个服务器，该服务器可以被其他工具调用。它启动 FastAPI 服务器，然后通过 HTTP 请求与其通信。
 
 ## 快速上手
 
@@ -59,16 +60,7 @@
 npx notemd-mcp-server
 ```
 
-#### 方法二：使用 `uvx` (基于 Python 的快速启动)
-
-`uvx` 是 `uv` 的 `npx` 等效物，允许远程执行 Python 包。
-
-```bash
-# 此命令将在隔离环境中临时安装并运行服务器。
-uvx notemd-mcp-server
-```
-
-#### 方法三：使用 `uv` 或 `pip` 进行本地安装
+#### 方法二：使用 `uv` 或 `pip` 进行本地安装
 
 此方法适用于希望克隆代码仓库并在本地管理文件的用户。
 
@@ -96,32 +88,28 @@ uvx notemd-mcp-server
     uvicorn main:app --reload
     ```
 
-### 方法四：通过 MCP 配置自动安装
+#### 方法三：MCP 配置
 
-对于高级用户和工具开发者，`notemd-mcp` 服务器支持通过配置文件进行自动发现和安装。
+要将 Notemd MCP 与您的任务控制平台 (MCP) 设置集成，请将以下内容添加到 `settings.json` 文件中的 `mcpServers` 对象：
 
-1.  **发现服务器**：其他工具可以读取本代码仓库中的 `mcp_servers.json` 文件，以找到服务器的安装命令。
-
-2.  **执行命令**：然后，该工具可以执行 JSON 文件中指定的命令来启动服务器。例如，一个工具可以从 `mcp_servers.json` 中解析出以下内容：
-
-    ```json
-    {
-      "mcpServers": {
-        "notemd-mcp": {
-          "description": "Notemd MCP Server - AI-powered text processing and knowledge management for your Markdown files.",
-          "command": "npx",
-          "args": [
-            "-y",
-            "notemd-mcp-server"
-          ]
-        }
-      }
-    }
-    ```
-
-    然后，该工具将执行 `npx -y notemd-mcp-server` 来启动服务器。
-
-此方法允许与其他开发工具和 CLI 无缝集成，使它们能够作为依赖项来启动和管理 `notemd-mcp` 服务器。
+```json
+ {
+   "mcpServers": {
+     "notemd-mcp": {
+       "description": "Notemd MCP Server - AI-powered text processing and knowledge management\n for your Markdown files.",
+       "command": "npx",
+       "args": [
+         "-y",
+         "notemd-mcp-server"
+       ],
+       "env": {
+         "OPENAI_API_KEY": "your_openai_api_key_here",
+         "DEEPSEEK_API_KEY": "your_deepseek_api_key_here"
+       }
+     }
+   }
+ }
+```
 
 ## 使用方法
 
@@ -133,15 +121,238 @@ uvx notemd-mcp-server
 
 ## API 端点
 
-| 端点                          | 方法   | 描述                                                                        |
-| ----------------------------- | ------ | --------------------------------------------------------------------------- |
-| `/process_content`            | `POST` | 接收一段文本并通过添加 `[[维基链接]]` 来丰富它。                            |
-| `/generate_title`             | `POST` | 从单个标题生成完整的文档。                                                  |
-| `/research_summarize`         | `POST` | 对一个主题进行网络搜索，并返回一个由 AI 生成的摘要。                        |
-| `/handle_file_rename`         | `POST` | 当文件被重命名时，更新 vault 中的所有反向链接。                             |
-| `/handle_file_delete`         | `POST` | 当文件被删除时，移除所有指向该文件的反向链接。                              |
-| `/batch_fix_mermaid`          | `POST` | 扫描一个文件夹并修正 `.md` 文件中常见的 Mermaid.js 和 LaTeX 语法错误。      |
-| `/health`                     | `GET`  | 一个简单的健康检查，以确认服务器正在运行。                                  |
+| 端点 | 方法 | 描述 | 请求体 | 响应 |
+| --- | --- | --- | --- | --- |
+| `/process_content` | `POST` | 接收一段文本并通过添加 `[[维基链接]]` 来丰富它。 | `{"content": "string", "cancelled": "boolean"}` | `{"processed_content": "string"}` |
+| `/generate_title` | `POST` | 从单个标题生成完整的文档。 | `{"title": "string", "cancelled": "boolean"}` | `{"generated_content": "string"}` |
+| `/research_summarize` | `POST` | 对一个主题进行网络搜索，并返回一个由 AI 生成的摘要。 | `{"topic": "string", "cancelled": "boolean"}` | `{"summary": "string"}` |
+| `/execute_custom_prompt` | `POST` | 执行用户定义的提示与给定内容。 | `{"prompt": "string", "content": "string", "cancelled": "boolean"}` | `{"response": "string"}` |
+| `/handle_file_rename` | `POST` | 当文件被重命名时，更新 vault 中的所有反向链接。 | `{"old_path": "string", "new_path": "string"}` | `{"status": "success"}` |
+| `/handle_file_delete` | `POST` | 当文件被删除时，移除所有指向该文件的反向链接。 | `{"path": "string"}` | `{"status": "success"}` |
+| `/batch_fix_mermaid` | `POST` | 扫描一个文件夹并修正 `.md` 文件中常见的 Mermaid.js 和 LaTeX 语法错误。 | `{"folder_path": "string"}` | `{"errors": [], "modified_count": "integer"}` |
+| `/health` | `GET` | 一个简单的健康检查，以确认服务器正在运行。 | (None) | `{"status": "ok"}` |
+
+## 配置
+
+所有配置都在 `config.py` 文件中处理。您可以在此处设置 API 密钥、文件路径和其他设置。
+
+### 核心设置
+
+`main.py` 中的 `notemd_core.set_settings` 函数使用以下参数初始化服务器的核心功能，这些参数主要来源于 `config.py`：
+
+-   `DEFAULT_PROVIDERS`：一个字典列表，每个字典定义一个 LLM 提供商，包含其 `name`、`apiKey`、`baseUrl`、`model`、`temperature` 和可选的 `apiVersion`（用于 Azure OpenAI）。
+-   `ACTIVE_PROVIDER`：默认用于所有操作的 LLM 提供商的名称。
+-   `CHUNK_WORD_COUNT`：在处理内容以进行维基链接时，每个块的最大单词数。
+-   `MAX_TOKENS`：LLM 交互允许的最大令牌数。
+-   `ENABLE_DUPLICATE_DETECTION`：布尔值，用于在维基链接期间启用/禁用重复概念检测。
+
+### 文件路径配置
+
+这些设置定义了您的知识库和日志的目录结构：
+
+-   `VAULT_ROOT`：您的 Obsidian vault 或 Markdown 文件根目录的绝对路径。
+-   `CONCEPT_NOTE_FOLDER`：`VAULT_ROOT` 中用于存储生成的概念笔记的子文件夹。
+-   `PROCESSED_FILE_FOLDER`：用于移动已处理的 Markdown 文件的子文件夹。
+-   `CONCEPT_LOG_FOLDER`：用于存储概念生成日志的子文件夹。
+-   `CONCEPT_LOG_FILE_NAME`：概念生成日志文件的名称。
+
+### 搜索配置
+
+与网络研究和摘要相关的设置：
+
+-   `TAVILY_API_KEY`：如果 `SEARCH_PROVIDER` 设置为 "tavily"，则为您的 Tavily API 密钥。
+-   `SEARCH_PROVIDER`：指定要使用的网络搜索引擎（"tavily" 或 "duckduckgo"）。
+-   `DDG_MAX_RESULTS`：从 DuckDuckGo 获取的最大结果数。
+-   `DDG_FETCH_TIMEOUT`：DuckDuckGo 搜索的超时时间（秒）。
+-   `MAX_RESEARCH_CONTENT_TOKENS`：研究中使用的内容的最大令牌数。
+-   `ENABLE_RESEARCH_IN_GENERATE_CONTENT`：布尔值，用于在从标题生成内容时启用/禁用网络研究。
+-   `TAVILY_MAX_RESULTS`：从 Tavily 获取的最大结果数。
+-   `TAVILY_SEARCH_DEPTH`：Tavily 的搜索深度（"basic" 或 "advanced"）。
+
+### 稳定 API 调用设置
+
+这些设置控制 LLM API 调用的重试机制：
+
+-   `ENABLE_STABLE_API_CALL`：布尔值，用于启用/禁用带重试的稳定 API 调用。
+-   `API_CALL_INTERVAL`：API 调用重试之间的时间间隔（秒）。
+-   `API_CALL_MAX_RETRIES`：失败 API 调用的最大重试次数。
+
+### 多模型和任务特定设置
+
+这些设置允许对特定任务使用哪个 LLM 提供商和模型进行细粒度控制：
+
+-   `ADD_LINKS_PROVIDER`：用于 `process_content`（添加链接）操作的 LLM 提供商。
+-   `RESEARCH_PROVIDER`：用于 `research_summarize` 操作的 LLM 提供商。
+-   `GENERATE_TITLE_PROVIDER`：用于 `generate_title` 操作的 LLM 提供商。
+-   `ADD_LINKS_MODEL`：用于添加链接的特定模型（如果设置，则覆盖提供商的默认值）。
+-   `RESEARCH_MODEL`：用于研究的特定模型（如果设置，则覆盖提供商的默认值）。
+-   `GENERATE_TITLE_MODEL`：用于标题生成的特定模型（如果设置，则覆盖提供商的默认值）。
+
+### 后处理设置
+
+-   `REMOVE_CODE_FENCES_ON_ADD_LINKS`：布尔值，用于在添加链接后从内容中删除代码围栏。
+
+### 语言设置
+
+-   `LANGUAGE`：内容处理的默认语言。
+-   `AVAILABLE_LANGUAGES`：支持的语言列表。
+
+### 自定义提示设置
+
+这些设置允许您启用和定义各种操作的自定义提示：
+
+-   `ENABLE_GLOBAL_CUSTOM_PROMPTS`：布尔值，用于全局启用/禁用自定义提示。
+-   `CUSTOM_PROMPT_ADD_LINKS`：`process_content`（添加链接）操作的自定义提示字符串。
+-   `CUSTOM_PROMPT_GENERATE_TITLE`：`generate_title` 操作的自定义提示字符串。
+-   `CUSTOM_PROMPT_RESEARCH_SUMMARIZE`：`research_summarize` 操作的自定义提示字符串。
+
+## 配置
+
+所有配置都在 `config.py` 文件中处理。您可以在此处设置 API 密钥、文件路径和其他设置。
+
+### 核心设置
+
+`main.py` 中的 `notemd_core.set_settings` 函数使用以下参数初始化服务器的核心功能，这些参数主要来源于 `config.py`：
+
+-   `DEFAULT_PROVIDERS`：一个字典列表，每个字典定义一个 LLM 提供商，包含其 `name`、`apiKey`、`baseUrl`、`model`、`temperature` 和可选的 `apiVersion`（用于 Azure OpenAI）。
+-   `ACTIVE_PROVIDER`：默认用于所有操作的 LLM 提供商的名称。
+-   `CHUNK_WORD_COUNT`：在处理内容以进行维基链接时，每个块的最大单词数。
+-   `MAX_TOKENS`：LLM 交互允许的最大令牌数。
+-   `ENABLE_DUPLICATE_DETECTION`：布尔值，用于在维基链接期间启用/禁用重复概念检测。
+
+### 文件路径配置
+
+这些设置定义了您的知识库和日志的目录结构：
+
+-   `VAULT_ROOT`：您的 Obsidian vault 或 Markdown 文件根目录的绝对路径。
+-   `CONCEPT_NOTE_FOLDER`：`VAULT_ROOT` 中用于存储生成的概念笔记的子文件夹。
+-   `PROCESSED_FILE_FOLDER`：用于移动已处理的 Markdown 文件的子文件夹。
+-   `CONCEPT_LOG_FOLDER`：用于存储概念生成日志的子文件夹。
+-   `CONCEPT_LOG_FILE_NAME`：概念生成日志文件的名称。
+
+### 搜索配置
+
+与网络研究和摘要相关的设置：
+
+-   `TAVILY_API_KEY`：如果 `SEARCH_PROVIDER` 设置为 "tavily"，则为您的 Tavily API 密钥。
+-   `SEARCH_PROVIDER`：指定要使用的网络搜索引擎（"tavily" 或 "duckduckgo"）。
+-   `DDG_MAX_RESULTS`：从 DuckDuckGo 获取的最大结果数。
+-   `DDG_FETCH_TIMEOUT`：DuckDuckGo 搜索的超时时间（秒）。
+-   `MAX_RESEARCH_CONTENT_TOKENS`：研究中使用的内容的最大令牌数。
+-   `ENABLE_RESEARCH_IN_GENERATE_CONTENT`：布尔值，用于在从标题生成内容时启用/禁用网络研究。
+-   `TAVILY_MAX_RESULTS`：从 Tavily 获取的最大结果数。
+-   `TAVILY_SEARCH_DEPTH`：Tavily 的搜索深度（"basic" 或 "advanced"）。
+
+### 稳定 API 调用设置
+
+这些设置控制 LLM API 调用的重试机制：
+
+-   `ENABLE_STABLE_API_CALL`：布尔值，用于启用/禁用带重试的稳定 API 调用。
+-   `API_CALL_INTERVAL`：API 调用重试之间的时间间隔（秒）。
+-   `API_CALL_MAX_RETRIES`：失败 API 调用的最大重试次数。
+
+### 多模型和任务特定设置
+
+这些设置允许对特定任务使用哪个 LLM 提供商和模型进行细粒度控制：
+
+-   `ADD_LINKS_PROVIDER`：用于 `process_content`（添加链接）操作的 LLM 提供商。
+-   `RESEARCH_PROVIDER`：用于 `research_summarize` 操作的 LLM 提供商。
+-   `GENERATE_TITLE_PROVIDER`：用于 `generate_title` 操作的 LLM 提供商。
+-   `ADD_LINKS_MODEL`：用于添加链接的特定模型（如果设置，则覆盖提供商的默认值）。
+-   `RESEARCH_MODEL`：用于研究的特定模型（如果设置，则覆盖提供商的默认值）。
+-   `GENERATE_TITLE_MODEL`：用于标题生成的特定模型（如果设置，则覆盖提供商的默认值）。
+
+### 后处理设置
+
+-   `REMOVE_CODE_FENCES_ON_ADD_LINKS`：布尔值，用于在添加链接后从内容中删除代码围栏。
+
+### 语言设置
+
+-   `LANGUAGE`：内容处理的默认语言。
+-   `AVAILABLE_LANGUAGES`：支持的语言列表。
+
+### 自定义提示设置
+
+这些设置允许您启用和定义各种操作的自定义提示：
+
+-   `ENABLE_GLOBAL_CUSTOM_PROMPTS`：布尔值，用于全局启用/禁用自定义提示。
+-   `CUSTOM_PROMPT_ADD_LINKS`：`process_content`（添加链接）操作的自定义提示字符串。
+-   `CUSTOM_PROMPT_GENERATE_TITLE`：`generate_title` 操作的自定义提示字符串。
+-   `CUSTOM_PROMPT_RESEARCH_SUMMARIZE`：`research_summarize` 操作的自定义提示字符串。
+
+## 配置
+
+所有配置都在 `config.py` 文件中处理。您可以在此处设置 API 密钥、文件路径和其他设置。
+
+### 核心设置
+
+`main.py` 中的 `notemd_core.set_settings` 函数使用以下参数初始化服务器的核心功能，这些参数主要来源于 `config.py`：
+
+-   `DEFAULT_PROVIDERS`：一个字典列表，每个字典定义一个 LLM 提供商，包含其 `name`、`apiKey`、`baseUrl`、`model`、`temperature` 和可选的 `apiVersion`（用于 Azure OpenAI）。
+-   `ACTIVE_PROVIDER`：默认用于所有操作的 LLM 提供商的名称。
+-   `CHUNK_WORD_COUNT`：在处理内容以进行维基链接时，每个块的最大单词数。
+-   `MAX_TOKENS`：LLM 交互允许的最大令牌数。
+-   `ENABLE_DUPLICATE_DETECTION`：布尔值，用于在维基链接期间启用/禁用重复概念检测。
+
+### 文件路径配置
+
+这些设置定义了您的知识库和日志的目录结构：
+
+-   `VAULT_ROOT`：您的 Obsidian vault 或 Markdown 文件根目录的绝对路径。
+-   `CONCEPT_NOTE_FOLDER`：`VAULT_ROOT` 中用于存储生成的概念笔记的子文件夹。
+-   `PROCESSED_FILE_FOLDER`：用于移动已处理的 Markdown 文件的子文件夹。
+-   `CONCEPT_LOG_FOLDER`：用于存储概念生成日志的子文件夹。
+-   `CONCEPT_LOG_FILE_NAME`：概念生成日志文件的名称。
+
+### 搜索配置
+
+与网络研究和摘要相关的设置：
+
+-   `TAVILY_API_KEY`：如果 `SEARCH_PROVIDER` 设置为 "tavily"，则为您的 Tavily API 密钥。
+-   `SEARCH_PROVIDER`：指定要使用的网络搜索引擎（"tavily" 或 "duckduckgo"）。
+-   `DDG_MAX_RESULTS`：从 DuckDuckGo 获取的最大结果数。
+-   `DDG_FETCH_TIMEOUT`：DuckDuckGo 搜索的超时时间（秒）。
+-   `MAX_RESEARCH_CONTENT_TOKENS`：研究中使用的内容的最大令牌数。
+-   `ENABLE_RESEARCH_IN_GENERATE_CONTENT`：布尔值，用于在从标题生成内容时启用/禁用网络研究。
+-   `TAVILY_MAX_RESULTS`：从 Tavily 获取的最大结果数。
+-   `TAVILY_SEARCH_DEPTH`：Tavily 的搜索深度（"basic" 或 "advanced"）。
+
+### 稳定 API 调用设置
+
+这些设置控制 LLM API 调用的重试机制：
+
+-   `ENABLE_STABLE_API_CALL`：布尔值，用于启用/禁用带重试的稳定 API 调用。
+-   `API_CALL_INTERVAL`：API 调用重试之间的时间间隔（秒）。
+-   `API_CALL_MAX_RETRIES`：失败 API 调用的最大重试次数。
+
+### 多模型和任务特定设置
+
+这些设置允许对特定任务使用哪个 LLM 提供商和模型进行细粒度控制：
+
+-   `ADD_LINKS_PROVIDER`：用于 `process_content`（添加链接）操作的 LLM 提供商。
+-   `RESEARCH_PROVIDER`：用于 `research_summarize` 操作的 LLM 提供商。
+-   `GENERATE_TITLE_PROVIDER`：用于 `generate_title` 操作的 LLM 提供商。
+-   `ADD_LINKS_MODEL`：用于添加链接的特定模型（如果设置，则覆盖提供商的默认值）。
+-   `RESEARCH_MODEL`：用于研究的特定模型（如果设置，则覆盖提供商的默认值）。
+-   `GENERATE_TITLE_MODEL`：用于标题生成的特定模型（如果设置，则覆盖提供商的默认值）。
+
+### 后处理设置
+
+-   `REMOVE_CODE_FENCES_ON_ADD_LINKS`：布尔值，用于在添加链接后从内容中删除代码围栏。
+
+### 语言设置
+
+-   `LANGUAGE`：内容处理的默认语言。
+-   `AVAILABLE_LANGUAGES`：支持的语言列表。
+
+### 自定义提示设置
+
+这些设置允许您启用和定义各种操作的自定义提示：
+
+-   `ENABLE_GLOBAL_CUSTOM_PROMPTS`：布尔值，用于全局启用/禁用自定义提示。
+-   `CUSTOM_PROMPT_ADD_LINKS`：`process_content`（添加链接）操作的自定义提示字符串。
+-   `CUSTOM_PROMPT_GENERATE_TITLE`：`generate_title` 操作的自定义提示字符串。
+-   `CUSTOM_PROMPT_RESEARCH_SUMMARIZE`：`research_summarize` 操作的自定义提示字符串。
 
 ## 许可证
 

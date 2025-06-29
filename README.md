@@ -138,23 +138,75 @@ You will see a complete, interactive Swagger UI where you can view details for e
 
 All configuration is handled in the `config.py` file. Here you can set API keys, file paths, and other settings.
 
-### Provider Configuration
+### Core Settings
 
-The `DEFAULT_PROVIDERS` list in `config.py` is where you configure your LLM providers. Each provider is a dictionary with the following keys:
+The `notemd_core.set_settings` function in `main.py` initializes the core functionalities of the server using the following parameters, primarily sourced from `config.py`:
 
--	`name`: The name of the provider (e.g., "DeepSeek", "OpenAI").
--	`api_key`: Your API key for the provider.
--	`base_url`: The base URL for the provider's API.
--	`model`: The default model to use for the provider.
--	`temperature`: The default temperature to use for the provider.
--	`api_version`: (Optional) The API version to use (required for Azure OpenAI).
+-   `DEFAULT_PROVIDERS`: A list of dictionaries, each defining an LLM provider with its `name`, `apiKey`, `baseUrl`, `model`, `temperature`, and optional `apiVersion` (for Azure OpenAI).
+-   `ACTIVE_PROVIDER`: The name of the LLM provider to be used by default for all operations.
+-   `CHUNK_WORD_COUNT`: The maximum number of words per chunk when processing content for wiki-linking.
+-   `MAX_TOKENS`: The maximum number of tokens allowed for LLM interactions.
+-   `ENABLE_DUPLICATE_DETECTION`: Boolean to enable/disable duplicate concept detection during wiki-linking.
+
+### File Paths Configuration
+
+These settings define the directory structure for your knowledge base and logs:
+
+-   `VAULT_ROOT`: The absolute path to your Obsidian vault or the root directory of your Markdown files.
+-   `CONCEPT_NOTE_FOLDER`: The subfolder within `VAULT_ROOT` where generated concept notes will be stored.
+-   `PROCESSED_FILE_FOLDER`: The subfolder where processed Markdown files will be moved.
+-   `CONCEPT_LOG_FOLDER`: The subfolder for storing concept generation logs.
+-   `CONCEPT_LOG_FILE_NAME`: The name of the log file for concept generation.
 
 ### Search Configuration
 
-You can choose between "tavily" and "duckduckgo" for web searches.
+Settings related to web research and summarization:
 
--	`SEARCH_PROVIDER`: Set to "tavily" or "duckduckgo".
--	`TAVILY_API_KEY`: Your Tavily API key (if using Tavily).
+-   `TAVILY_API_KEY`: Your API key for Tavily, if `SEARCH_PROVIDER` is set to "tavily".
+-   `SEARCH_PROVIDER`: Specifies the web search engine to use ("tavily" or "duckduckgo").
+-   `DDG_MAX_RESULTS`: Maximum number of results to fetch from DuckDuckGo.
+-   `DDG_FETCH_TIMEOUT`: Timeout in seconds for DuckDuckGo searches.
+-   `MAX_RESEARCH_CONTENT_TOKENS`: Maximum tokens for content used in research.
+-   `ENABLE_RESEARCH_IN_GENERATE_CONTENT`: Boolean to enable/disable web research when generating content from a title.
+-   `TAVILY_MAX_RESULTS`: Maximum number of results to fetch from Tavily.
+-   `TAVILY_SEARCH_DEPTH`: Search depth for Tavily ("basic" or "advanced").
+
+### Stable API Call Settings
+
+These settings control the retry mechanism for LLM API calls:
+
+-   `ENABLE_STABLE_API_CALL`: Boolean to enable/disable stable API calls with retries.
+-   `API_CALL_INTERVAL`: Interval in seconds between API call retries.
+-   `API_CALL_MAX_RETRIES`: Maximum number of retries for a failed API call.
+
+### Multi-Model and Task-Specific Settings
+
+These settings allow for fine-grained control over which LLM provider and model are used for specific tasks:
+
+-   `ADD_LINKS_PROVIDER`: The LLM provider to use for the `process_content` (add links) operation.
+-   `RESEARCH_PROVIDER`: The LLM provider to use for the `research_summarize` operation.
+-   `GENERATE_TITLE_PROVIDER`: The LLM provider to use for the `generate_title` operation.
+-   `ADD_LINKS_MODEL`: Specific model to use for adding links (overrides provider's default if set).
+-   `RESEARCH_MODEL`: Specific model to use for research (overrides provider's default if set).
+-   `GENERATE_TITLE_MODEL`: Specific model to use for title generation (overrides provider's default if set).
+
+### Post-processing Settings
+
+-   `REMOVE_CODE_FENCES_ON_ADD_LINKS`: Boolean to remove code fences from content after adding links.
+
+### Language Settings
+
+-   `LANGUAGE`: The default language for content processing.
+-   `AVAILABLE_LANGUAGES`: A list of supported languages.
+
+### Custom Prompt Settings
+
+These settings allow you to enable and define custom prompts for various operations:
+
+-   `ENABLE_GLOBAL_CUSTOM_PROMPTS`: Boolean to enable/disable the use of custom prompts globally.
+-   `CUSTOM_PROMPT_ADD_LINKS`: Custom prompt string for the `process_content` (add links) operation.
+-   `CUSTOM_PROMPT_GENERATE_TITLE`: Custom prompt string for the `generate_title` operation.
+-   `CUSTOM_PROMPT_RESEARCH_SUMMARIZE`: Custom prompt string for the `research_summarize` operation.
 
 ## License
 
