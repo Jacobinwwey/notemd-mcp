@@ -2,6 +2,7 @@
   "name": "notemd-mcp-server",
   "version": "0.4.0",
   "description": "A standalone backend server for the Notemd Obsidian plugin, providing AI-powered text processing and knowledge management.",
+  "type": "module",
   "main": "cli.js",
   "bin": {
     "notemd-mcp": "./cli.js"
@@ -27,5 +28,9 @@
     "requirements.txt",
     "README.md",
     "README_zh.md"
-  ]
+  ],
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.13.2",
+    "axios": "^1.10.0"
+  }
 }

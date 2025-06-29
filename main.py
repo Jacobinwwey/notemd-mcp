@@ -3,9 +3,10 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import uvicorn
+import json
 
-from . import config
-from . import notemd_core
+import config
+import notemd_core
 
 # Set settings in notemd_core
 notemd_core.set_settings({
