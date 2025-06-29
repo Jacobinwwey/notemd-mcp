@@ -35,8 +35,8 @@ async function main() {
         console.log('Dependencies installed successfully.');
 
         console.log('Starting Notemd MCP server with Uvicorn...');
-        const mainPyPath = path.join(__dirname, 'main:app');
-        await runCommand('python', ['-m', 'uvicorn', mainPyPath, '--host', '0.0.0.0', '--port', '8000']);
+        const mainPyModule = 'main:app';
+        await runCommand('python', ['-m', 'uvicorn', mainPyModule, '--host', '0.0.0.0', '--port', '8000'], { cwd: __dirname });
 
     } catch (error) {
         console.error('Failed to start the Notemd MCP server:', error.message);
