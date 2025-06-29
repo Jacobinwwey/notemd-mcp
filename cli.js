@@ -2,8 +2,10 @@
 
 import { spawn } from 'child_process';
 import path from 'path';
-import { fileURLToPath } from 'url'; // Import fileURLToPath
-import axios from 'axios'; // Import axios for making HTTP requests
+import { fileURLToPath } from 'url';
+import axios from 'axios';
+import yargs from 'yargs';
+import { hideBin } from 'yargs/helpers';
 
 // Import MCP SDK components
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
@@ -16,13 +18,11 @@ const __dirname = path.dirname(__filename);
 const FASTAPI_PORT = 8000;
 const FASTAPI_URL = `http://localhost:${FASTAPI_PORT}`;
 
-// Axios instance for FastAPI communication
 const fastapiClient = axios.create({
     baseURL: FASTAPI_URL,
     timeout: 60000, // 60 seconds timeout
 });
 
-// Function to run shell commands
 function runCommand(command, args, options = {}) {
     return new Promise((resolve, reject) => {
         const proc = spawn(command, args, { stdio: 'inherit', ...options });
@@ -54,7 +54,6 @@ class NotemdMcpServer {
     }
 
     async _list_tools() {
-        // Define MCP tools corresponding to FastAPI endpoints
         const tools = [
             {
                 name: "process_content",
@@ -194,6 +193,12 @@ class NotemdMcpServer {
 }
 
 async function main() {
+    const argv = yargs(hideBin(process.argv)).option('config', {
+        alias: 'c',
+        type: 'string',
+        description: 'Base64 encoded JSON configuration for the server'
+    }).argv;
+
     try {
         console.error('Verifying Python installation...');
         await runCommand('python', ['--version']);
@@ -208,9 +213,15 @@ async function main() {
         await runCommand('python', ['-m', 'pip', 'install', '-r', requirementsPath]);
         console.error('Dependencies installed successfully.');
 
+        // Set environment variable for the Python process
+        const env = { ...process.env };
+        if (argv.config) {
+            env.NOTEMD_CONFIG = argv.config;
+        }
+
         // Start FastAPI server in the background
         const mainPyModule = 'main:app';
-        const fastapiProcess = spawn('python', ['-m', 'uvicorn', mainPyModule, '--host', '0.0.0.0', '--port', FASTAPI_PORT.toString()], { cwd: __dirname, stdio: 'inherit' });
+        const fastapiProcess = spawn('python', ['-m', 'uvicorn', mainPyModule, '--host', '0.0.0.0', '--port', FASTAPI_PORT.toString()], { cwd: __dirname, stdio: 'inherit', env });
 
         fastapiProcess.on('close', (code) => {
             if (code !== 0) {
@@ -218,18 +229,18 @@ async function main() {
             }
         });
 
-        // Wait for FastAPI to start (simplified check)
+        // Wait for FastAPI to start
         let fastapiReady = false;
         let attempts = 0;
-        const maxAttempts = 10;
+        const maxAttempts = 15; // Increased attempts
         while (!fastapiReady && attempts < maxAttempts) {
             try {
-                await fastapiClient.get('/health'); // Assuming a health check endpoint
+                await fastapiClient.get('/health');
                 fastapiReady = true;
-                console.error('FastAPI server is ready.'); // Changed to error
+                console.error('FastAPI server is ready.');
             } catch (err) {
-                console.error(`Waiting for FastAPI server... (attempt ${attempts + 1}/${maxAttempts})`); // Changed to error
-                await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds
+                console.error(`Waiting for FastAPI server... (attempt ${attempts + 1}/${maxAttempts})`);
+                await new Promise(resolve => setTimeout(resolve, 2000));
                 attempts++;
             }
         }

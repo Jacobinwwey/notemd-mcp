@@ -4,11 +4,34 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import uvicorn
 import json
+import base64
+import os
+import binascii
 
 import config
 import notemd_core
 
-# Set settings in notemd_core
+def apply_user_config():
+    """Applies user configuration from an environment variable."""
+    config_str = os.environ.get('NOTEMD_CONFIG')
+    if config_str:
+        print("Found configuration in environment variable. Applying...")
+        try:
+            decoded_config = base64.b64decode(config_str).decode('utf-8')
+            user_config = json.loads(decoded_config)
+            for key, value in user_config.items():
+                if hasattr(config, key):
+                    print(f"Overriding config: {key} = {value}")
+                    setattr(config, key, value)
+        except (json.JSONDecodeError, binascii.Error, Exception) as e:
+            print(f"Error processing config from environment variable: {e}")
+    else:
+        print("No custom configuration found in environment variables.")
+
+# Apply config when module is loaded
+apply_user_config()
+
+# Set settings in notemd_core after applying any user config
 notemd_core.set_settings({
     "DEFAULT_PROVIDERS": config.DEFAULT_PROVIDERS,
     "ACTIVE_PROVIDER": config.ACTIVE_PROVIDER,
@@ -31,7 +54,7 @@ notemd_core.set_settings({
     "ENABLE_STABLE_API_CALL": config.ENABLE_STABLE_API_CALL,
     "API_CALL_INTERVAL": config.API_CALL_INTERVAL,
     "API_CALL_MAX_RETRIES": config.API_CALL_MAX_RETRIES,
-    "USE_MULTI_MODEL_SETTINGS": False, # For now, keep this False as multi-model selection is complex
+    "USE_MULTI_MODEL_SETTINGS": False,
     "ADD_LINKS_PROVIDER": config.ADD_LINKS_PROVIDER,
     "RESEARCH_PROVIDER": config.RESEARCH_PROVIDER,
     "GENERATE_TITLE_PROVIDER": config.GENERATE_TITLE_PROVIDER,
@@ -159,7 +182,8 @@ async def health_check():
     return {"status": "ok"}
 
 def start_server():
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    """Starts the uvicorn server."""
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
 
 if __name__ == "__main__":
     start_server()
