@@ -88,6 +88,31 @@ This method is for users who want to clone the repository and manage the files l
     uvicorn main:app --reload
     ```
 
+#### Method 3: MCP Configuration
+
+To integrate Notemd MCP with your Mission Control Platform (MCP) setup, add the following to the `mcpServers` object in your `settings.json` file:
+
+```json
+ {
+   "mcpServers": {
+     "notemd-mcp": {
+       "description": "Notemd MCP Server - AI-powered text processing and knowledge management
+ for your Markdown files.",
+       "command": "npx",
+       "args": [
+         "-y",
+         "notemd-mcp-server"
+       ],
+       "env": {
+         "OPENAI_API_KEY": "your_openai_api_key_here",
+         "DEEPSEEK_API_KEY": "your_deepseek_api_key_here"
+       }
+     }
+   }
+ }
+```
+
+
 ## Usage
 
 The best way to explore and interact with the API is through the automatically generated documentation.
