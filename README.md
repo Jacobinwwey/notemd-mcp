@@ -52,23 +52,20 @@ Choose the method that best fits your workflow.
 
 #### Method 1: Using `npx` (Recommended for Quick Start)
 
-This is the simplest way to start the server. `npx` will temporarily download and run the package.
+This is the simplest way to start the server. `npx` will temporarily download and run the package. This method now supports **stdio mode**, meaning you will see the FastAPI server logs directly in your terminal.
 
 ```bash
 # This single command will download the package and start the server.
 npx notemd-mcp-server
 ```
 
-#### Method 2: Using `uvx` (Python-based Quick Start)
+#### Note on `uvx` for Quick Start
 
-`uvx` is the `uv` equivalent of `npx`, allowing for remote execution of Python packages.
+While `uvx` is a powerful tool for running Python executables in isolated environments, it is not ideal for a single-command "quick start" for this project. This is because `uvx` creates ephemeral environments for each invocation, and does not natively support installing arbitrary local project dependencies (like those in `requirements.txt`) and then running the application in a single, persistent step.
 
-```bash
-# This command will temporarily install and run the server in an isolated environment.
-uvx notemd-mcp-server
-```
+For a truly quick and seamless start, **Method 1: Using `npx`** is highly recommended as it handles all Python dependency installations automatically.
 
-#### Method 3: Local Installation with `uv` or `pip`
+#### Method 2: Local Installation with `uv` or `pip`
 
 This method is for users who want to clone the repository and manage the files locally.
 
@@ -96,7 +93,7 @@ This method is for users who want to clone the repository and manage the files l
     uvicorn main:app --reload
     ```
 
-### Method 4: Automated Installation via MCP Configuration
+### Method 3: Automated Installation via MCP Configuration
 
 For advanced users and tool developers, the `notemd-mcp` server supports automated discovery and installation through a configuration file.
 
@@ -147,4 +144,3 @@ You will see a complete, interactive Swagger UI where you can view details for e
 ## License
 
 This project is licensed under the MIT License. See the `LICENSE` file for details.
-

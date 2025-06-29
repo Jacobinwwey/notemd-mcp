@@ -210,20 +210,10 @@ async function main() {
 
         // Start FastAPI server in the background
         const mainPyModule = 'main:app';
-        const fastapiProcess = spawn('python', ['-m', 'uvicorn', mainPyModule, '--host', '0.0.0.0', '--port', FASTAPI_PORT.toString()], { cwd: __dirname });
-
-        fastapiProcess.stdout.on('data', (data) => {
-            console.error(`FastAPI stdout: ${data}`); // Changed to error
-        });
-
-        fastapiProcess.stderr.on('data', (data) => {
-            console.error(`FastAPI stderr: ${data}`);
-        });
+        const fastapiProcess = spawn('python', ['-m', 'uvicorn', mainPyModule, '--host', '0.0.0.0', '--port', FASTAPI_PORT.toString()], { cwd: __dirname, stdio: 'inherit' });
 
         fastapiProcess.on('close', (code) => {
-            console.error(`FastAPI process exited with code ${code}`); // Changed to error
             if (code !== 0) {
-                console.error('FastAPI server crashed!');
                 process.exit(1);
             }
         });
