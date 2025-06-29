@@ -5,8 +5,9 @@ import httpx
 import json
 import time
 import os
+import asyncio
 from typing import List, Dict, Any, Optional
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, quote
 from selectolax.parser import HTMLParser
 
 # Placeholder for settings, will be imported from config.py
@@ -44,15 +45,15 @@ def get_provider_for_task(task_type: str) -> Optional[Dict[str, Any]]:
     return None
 
 def get_model_for_task(task_type: str, provider_config: Dict[str, Any]) -> str:
-    model_name = provider_config["model"]
+    model_name = provider_config.get("model")
     if SETTINGS.get("USE_MULTI_MODEL_SETTINGS", False):
         if task_type == "addLinks":
-            model_name = SETTINGS.get("ADD_LINKS_MODEL", "") or model_name
+            model_name = SETTINGS.get("ADD_LINKS_MODEL") or model_name
         elif task_type == "research":
-            model_name = SETTINGS.get("RESEARCH_MODEL", "") or model_name
+            model_name = SETTINGS.get("RESEARCH_MODEL") or model_name
         elif task_type == "generateTitle":
-            model_name = SETTINGS.get("GENERATE_TITLE_MODEL", "") or model_name
-    return model_name
+            model_name = SETTINGS.get("GENERATE_TITLE_MODEL") or model_name
+    return model_name or ""
 
 # --- Content Splitting (from utils.ts) ---
 def split_content(content: str) -> List[str]:
@@ -84,7 +85,7 @@ def split_content(content: str) -> List[str]:
 
 # --- LLM Processing Prompt (from llmUtils.ts) ---
 def get_llm_processing_prompt() -> str:
-    return SETTINGS.get("CUSTOM_PROMPT_ADD_LINKS")
+    return SETTINGS.get("CUSTOM_PROMPT_ADD_LINKS", "")
 
 # --- LLM API Call Implementations ---
 async def execute_deepseek_api(provider_config: Dict[str, Any], model_name: str, prompt: str, content: str) -> str:
@@ -261,9 +262,8 @@ def refine_mermaid_blocks(content: str) -> str:
             if "subgraph" not in line:
                 line = line.replace('"', '')
 
-            line_without_brackets = re.sub(r'[(){}]', '', line)
-            current_block_lines.append(line_without_brackets)
-            if "-->" in line_without_brackets:
+            current_block_lines.append(line)
+            if "-->" in line:
                 last_arrow_index_in_block = len(current_block_lines) - 1
             if stripped == '```':
                 result_lines.extend(current_block_lines)
@@ -294,7 +294,6 @@ def refine_mermaid_blocks(content: str) -> str:
 def cleanup_latex_delimiters(content: str) -> str:
     processed = content
     processed = re.sub(r'\\\$', '___TEMP_DOLLAR_ESCAPE___', processed)
-    processed = re.sub(r'\\(\\|\\\\)', '$', processed)
     processed = re.sub(r'\$\s*([^$]*?)\s*\$', lambda m: m.group(0) if m.group(0).startswith('$$') and m.group(0).endswith('$$') else f"${m.group(1).strip()}$", processed)
     processed = re.sub(r'___TEMP_DOLLAR_ESCAPE___', '$', processed)
     return processed
@@ -306,7 +305,7 @@ def find_duplicates(content: str) -> set[str]:
     lines = content.split('\n')
 
     for line in lines:
-        words = re.findall(r'[\\p{L}\\p{N}]+(?:[''\\-][\\p{L}\\p{N}]+)*', line, re.UNICODE)
+        words = re.findall(r'\b\w+\b', line)
         for word in words:
             normalized = word.lower().replace("'s", '')
             if len(normalized) > 2:
@@ -332,7 +331,7 @@ async def handle_duplicates(content: str):
 # --- Search Functions (from searchUtils.ts) ---
 async def search_duckduckgo(query: str) -> List[Dict[str, str]]:
     max_results = SETTINGS.get("DDG_MAX_RESULTS", 5)
-    encoded_query = httpx.URL(query).raw_path.decode()
+    encoded_query = quote(query)
     url = f"https://html.duckduckgo.com/html/?q={encoded_query}"
     results = []
 
@@ -366,7 +365,7 @@ async def search_duckduckgo(query: str) -> List[Dict[str, str]]:
                         parsed_url = urlparse(link)
                         decoded_link = parse_qs(parsed_url.query).get('uddg', [None])[0]
                         if decoded_link:
-                            link = httpx.URL(decoded_link).raw_path.decode()
+                            link = decoded_link
                         else:
                             print(f"Warning: Could not decode DDG redirect URL: {link}")
                             link = f"https://duckduckgo.com{link}"
@@ -403,6 +402,8 @@ async def fetch_content_from_url(url: str) -> str:
             return f"[Content skipped: Not HTML - {content_type}]"
 
         parser = HTMLParser(response.text)
+        if parser.body is None:
+            return "[Content skipped: No body tag found]"
         for script in parser.css('script'): script.decompose()
         for style in parser.css('style'): style.decompose()
 
@@ -474,7 +475,7 @@ async def _perform_research(topic: str, cancelled: bool) -> Optional[str]:
         if search_source == 'DuckDuckGo':
             print(f"Fetching content for top {len(search_results)} DuckDuckGo results...")
             fetch_promises = [fetch_content_from_url(result["url"]) for result in search_results]
-            fetched_contents = await httpx.gather(*fetch_promises)
+            fetched_contents = await asyncio.gather(*fetch_promises)
             if cancelled: raise Exception("Processing cancelled by user during DuckDuckGo content fetching.")
             print(f"Finished fetching content for DuckDuckGo results.")
         else:
@@ -570,7 +571,11 @@ async def generate_content_for_title(title: str, cancelled: bool = False) -> str
     if cancelled: raise Exception("Processing cancelled by user before generation prompt construction.")
 
     research_context_section = f"\n\nUse the following research context to inform the documentation:\n\n{research_context}\n\n" if research_context else ""
-    generation_prompt = SETTINGS.get("CUSTOM_PROMPT_GENERATE_TITLE").format(TITLE=title, RESEARCH_CONTEXT_SECTION=research_context_section)
+    
+    custom_prompt_template = SETTINGS.get("CUSTOM_PROMPT_GENERATE_TITLE")
+    if not custom_prompt_template:
+        raise ValueError("Custom prompt for 'Generate from Title' is not configured.")
+    generation_prompt = custom_prompt_template.format(TITLE=title, RESEARCH_CONTEXT_SECTION=research_context_section)
 
     target_language_name = next((lang["name"] for lang in SETTINGS.get("AVAILABLE_LANGUAGES", []) if lang["code"] == SETTINGS.get("LANGUAGE", "en")), SETTINGS.get("LANGUAGE", "en"))
     if SETTINGS.get("LANGUAGE", "en") != "en":
@@ -621,7 +626,10 @@ async def research_and_summarize(topic: str, cancelled: bool = False) -> str:
 
     if cancelled: raise Exception("Processing cancelled by user before summarization.")
 
-    summary_prompt = SETTINGS.get("CUSTOM_PROMPT_RESEARCH_SUMMARIZE").format(TOPIC=topic, SEARCH_RESULTS_CONTEXT=research_context)
+    summary_prompt_template = SETTINGS.get("CUSTOM_PROMPT_RESEARCH_SUMMARIZE")
+    if not summary_prompt_template:
+        raise ValueError("Custom prompt for 'Research & Summarize' is not configured.")
+    summary_prompt = summary_prompt_template.format(TOPIC=topic, SEARCH_RESULTS_CONTEXT=research_context)
 
     summary = await call_llm_api(provider_config, model_name, summary_prompt, "", cancelled)
 
