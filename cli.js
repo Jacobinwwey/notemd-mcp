@@ -42,7 +42,7 @@ function runCommand(command, args, options = {}) {
 class NotemdMcpServer {
     constructor() {
         this.mcp_server = new Server(
-            { name: "notemd-mcp", version: "0.5.0" },
+            { name: "notemd-mcp", version: "0.6.0" },
             { capabilities: { tools: {} } }
         );
         this.setupToolHandlers();
@@ -105,6 +105,126 @@ class NotemdMcpServer {
                 }
             },
             {
+                name: "translate_content",
+                description: "Translate markdown/text content into a target language.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        content: { type: "string", description: "Source content to translate." },
+                        target_language: { type: "string", description: "Target language code or name.", default: "en" },
+                        cancelled: { type: "boolean", description: "Whether the operation has been cancelled.", default: false }
+                    },
+                    required: ["content"]
+                }
+            },
+            {
+                name: "summarize_as_mermaid",
+                description: "Generate a Mermaid mindmap summary from source content.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        content: { type: "string", description: "Source content to summarize." },
+                        target_language: { type: "string", description: "Preferred output language for labels.", default: "en" },
+                        cancelled: { type: "boolean", description: "Whether the operation has been cancelled.", default: false }
+                    },
+                    required: ["content"]
+                }
+            },
+            {
+                name: "generate_diagram",
+                description: "Generate a canonical diagram artifact from source content.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        content: { type: "string", description: "Source content to diagram." },
+                        diagram_intent: { type: "string", description: "Preferred intent: auto, mindmap, flowchart, sequence, classDiagram, erDiagram, stateDiagram.", default: "auto" },
+                        target_language: { type: "string", description: "Preferred output language for labels.", default: "en" },
+                        compatibility_mode: { type: "string", description: "canonical or legacy-mermaid", default: "canonical" },
+                        cancelled: { type: "boolean", description: "Whether the operation has been cancelled.", default: false }
+                    },
+                    required: ["content"]
+                }
+            },
+            {
+                name: "generate_experimental_diagram",
+                description: "Legacy alias of generate_diagram using legacy-mermaid compatibility mode.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        content: { type: "string", description: "Source content to diagram." },
+                        diagram_intent: { type: "string", description: "Preferred intent.", default: "auto" },
+                        target_language: { type: "string", description: "Preferred output language for labels.", default: "en" },
+                        cancelled: { type: "boolean", description: "Whether the operation has been cancelled.", default: false }
+                    },
+                    required: ["content"]
+                }
+            },
+            {
+                name: "preview_diagram",
+                description: "Preview diagram generation output (canonical action parity).",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        content: { type: "string", description: "Source content to diagram." },
+                        diagram_intent: { type: "string", description: "Preferred intent.", default: "auto" },
+                        target_language: { type: "string", description: "Preferred output language for labels.", default: "en" },
+                        compatibility_mode: { type: "string", description: "canonical or legacy-mermaid", default: "canonical" },
+                        cancelled: { type: "boolean", description: "Whether the operation has been cancelled.", default: false }
+                    },
+                    required: ["content"]
+                }
+            },
+            {
+                name: "preview_experimental_diagram",
+                description: "Legacy preview alias for experimental diagram action.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        content: { type: "string", description: "Source content to diagram." },
+                        diagram_intent: { type: "string", description: "Preferred intent.", default: "auto" },
+                        target_language: { type: "string", description: "Preferred output language for labels.", default: "en" },
+                        cancelled: { type: "boolean", description: "Whether the operation has been cancelled.", default: false }
+                    },
+                    required: ["content"]
+                }
+            },
+            {
+                name: "extract_concepts",
+                description: "Extract a deduplicated list of core concepts from content.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        content: { type: "string", description: "Source content for concept extraction." },
+                        cancelled: { type: "boolean", description: "Whether the operation has been cancelled.", default: false }
+                    },
+                    required: ["content"]
+                }
+            },
+            {
+                name: "extract_original_text",
+                description: "Map user inputs to verbatim matching excerpts from reference content.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        reference_content: { type: "string", description: "Reference source text." },
+                        user_input: { type: "string", description: "User query/questions to map against reference content." },
+                        cancelled: { type: "boolean", description: "Whether the operation has been cancelled.", default: false }
+                    },
+                    required: ["reference_content", "user_input"]
+                }
+            },
+            {
+                name: "check_duplicates",
+                description: "Return normalized duplicate terms found in content.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        content: { type: "string", description: "Content to analyze for duplicate terms." }
+                    },
+                    required: ["content"]
+                }
+            },
+            {
                 name: "handle_file_rename",
                 description: "Update backlinks when a file is renamed.",
                 inputSchema: {
@@ -161,6 +281,33 @@ class NotemdMcpServer {
                 case "execute_custom_prompt":
                     responseData = await fastapiClient.post('/execute_custom_prompt', args);
                     return { content: [{ type: "text", text: responseData.data.response }] };
+                case "translate_content":
+                    responseData = await fastapiClient.post('/translate_content', args);
+                    return { content: [{ type: "text", text: responseData.data.translated_content }] };
+                case "summarize_as_mermaid":
+                    responseData = await fastapiClient.post('/summarize_as_mermaid', args);
+                    return { content: [{ type: "text", text: responseData.data.mermaid_summary }] };
+                case "generate_diagram":
+                    responseData = await fastapiClient.post('/generate_diagram', args);
+                    return { content: [{ type: "text", text: responseData.data.diagram }] };
+                case "generate_experimental_diagram":
+                    responseData = await fastapiClient.post('/generate_experimental_diagram', args);
+                    return { content: [{ type: "text", text: responseData.data.diagram }] };
+                case "preview_diagram":
+                    responseData = await fastapiClient.post('/preview_diagram', args);
+                    return { content: [{ type: "text", text: responseData.data.diagram }] };
+                case "preview_experimental_diagram":
+                    responseData = await fastapiClient.post('/preview_experimental_diagram', args);
+                    return { content: [{ type: "text", text: responseData.data.diagram }] };
+                case "extract_concepts":
+                    responseData = await fastapiClient.post('/extract_concepts', args);
+                    return { content: [{ type: "text", text: JSON.stringify(responseData.data.concepts) }] };
+                case "extract_original_text":
+                    responseData = await fastapiClient.post('/extract_original_text', args);
+                    return { content: [{ type: "text", text: responseData.data.extracted_text }] };
+                case "check_duplicates":
+                    responseData = await fastapiClient.post('/check_duplicates', args);
+                    return { content: [{ type: "text", text: JSON.stringify(responseData.data) }] };
                 case "handle_file_rename":
                     responseData = await fastapiClient.post('/handle_file_rename', args);
                     return { content: [{ type: "text", text: responseData.data.status }] };

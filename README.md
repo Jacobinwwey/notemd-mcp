@@ -23,6 +23,8 @@ Built with Python and FastAPI, this server allows you to offload heavy computati
 -	**AI-Powered Content Enrichment**: Automatically processes Markdown content to identify key concepts and create `[[wiki-links]]`, building a deeply interconnected knowledge graph.
 -	**Automated Documentation Generation**: Generates comprehensive, structured documentation from a single title or keyword, optionally using web research for context.
 -	**Integrated Web Research & Summarization**: Performs web searches using Tavily or DuckDuckGo and uses an LLM to provide concise summaries on any topic.
+-	**Diagram Workflows (Canonical + Compatibility Alias)**: Supports `generate_diagram` as the canonical flow plus `generate_experimental_diagram` as a legacy compatibility alias aligned with modern NotEMD command surfaces.
+-	**Translation & Extraction Utilities**: Adds first-class translation, concept extraction, and verbatim original-text extraction operations for automation pipelines.
 -	**Knowledge Graph Integrity**: Includes endpoints to automatically update or remove backlinks when files are renamed or deleted, preventing broken links.
 -	**Syntax Correction**: Provides a utility to batch-fix common Mermaid.js and LaTeX syntax errors often found in LLM-generated content.
 -	**Highly Configurable**: All major features, API keys, file paths, and model parameters are easily managed in a central `config.py` file.
@@ -129,6 +131,15 @@ You will see a complete, interactive Swagger UI where you can view details for e
 | `/generate_title` | `POST` | Generates full documentation from a single title. | `{"title": "string", "cancelled": "boolean"}` | `{"generated_content": "string"}` |
 | `/research_summarize` | `POST` | Performs a web search on a topic and returns an AI-generated summary. | `{"topic": "string", "cancelled": "boolean"}` | `{"summary": "string"}` |
 | `/execute_custom_prompt` | `POST` | Execute a user-defined prompt with given content. | `{"prompt": "string", "content": "string", "cancelled": "boolean"}` | `{"response": "string"}` |
+| `/translate_content` | `POST` | Translate text/markdown into a target language. | `{"content": "string", "target_language": "string", "cancelled": "boolean"}` | `{"translated_content": "string"}` |
+| `/summarize_as_mermaid` | `POST` | Summarize content as a Mermaid mindmap. | `{"content": "string", "target_language": "string", "cancelled": "boolean"}` | `{"mermaid_summary": "string"}` |
+| `/generate_diagram` | `POST` | Canonical diagram generation endpoint. | `{"content": "string", "diagram_intent": "string", "target_language": "string", "compatibility_mode": "string", "cancelled": "boolean"}` | `{"diagram": "string"}` |
+| `/generate_experimental_diagram` | `POST` | Legacy compatibility alias for diagram generation. | `{"content": "string", "diagram_intent": "string", "target_language": "string", "cancelled": "boolean"}` | `{"diagram": "string"}` |
+| `/preview_diagram` | `POST` | Canonical preview diagram endpoint (no file side effects). | `{"content": "string", "diagram_intent": "string", "target_language": "string", "compatibility_mode": "string", "cancelled": "boolean"}` | `{"diagram": "string"}` |
+| `/preview_experimental_diagram` | `POST` | Legacy preview alias for compatibility. | `{"content": "string", "diagram_intent": "string", "target_language": "string", "cancelled": "boolean"}` | `{"diagram": "string"}` |
+| `/extract_concepts` | `POST` | Extract deduplicated core concept list. | `{"content": "string", "cancelled": "boolean"}` | `{"concepts": ["..."]}` |
+| `/extract_original_text` | `POST` | Extract verbatim matches for user input from reference content. | `{"reference_content": "string", "user_input": "string", "cancelled": "boolean"}` | `{"extracted_text": "string"}` |
+| `/check_duplicates` | `POST` | Return normalized duplicate terms detected in content. | `{"content": "string"}` | `{"duplicates": ["..."], "count": 0}` |
 | `/handle_file_rename` | `POST` | Updates all backlinks in the vault when a file is renamed. | `{"old_path": "string", "new_path": "string"}` | `{"status": "success"}` |
 | `/handle_file_delete` | `POST` | Removes all backlinks to a file that has been deleted. | `{"path": "string"}` | `{"status": "success"}` |
 | `/batch_fix_mermaid` | `POST` | Scans a folder and corrects common Mermaid.js and LaTeX syntax errors in `.md` files. | `{"folder_path": "string"}` | `{"errors": [], "modified_count": "integer"}` |
@@ -186,9 +197,15 @@ These settings allow for fine-grained control over which LLM provider and model 
 -   `ADD_LINKS_PROVIDER`: The LLM provider to use for the `process_content` (add links) operation.
 -   `RESEARCH_PROVIDER`: The LLM provider to use for the `research_summarize` operation.
 -   `GENERATE_TITLE_PROVIDER`: The LLM provider to use for the `generate_title` operation.
+-   `TRANSLATE_PROVIDER`: Provider for `translate_content`.
+-   `SUMMARIZE_TO_MERMAID_PROVIDER`: Provider for `summarize_as_mermaid`.
+-   `EXTRACT_CONCEPTS_PROVIDER`: Provider for `extract_concepts`.
+-   `EXTRACT_ORIGINAL_TEXT_PROVIDER`: Provider for `extract_original_text`.
+-   `DIAGRAM_PROVIDER`: Provider for `generate_diagram`.
 -   `ADD_LINKS_MODEL`: Specific model to use for adding links (overrides provider's default if set).
 -   `RESEARCH_MODEL`: Specific model to use for research (overrides provider's default if set).
 -   `GENERATE_TITLE_MODEL`: Specific model to use for title generation (overrides provider's default if set).
+-   `TRANSLATE_MODEL`, `SUMMARIZE_TO_MERMAID_MODEL`, `EXTRACT_CONCEPTS_MODEL`, `EXTRACT_ORIGINAL_TEXT_MODEL`, `DIAGRAM_MODEL`: Task-specific model overrides.
 
 ### Post-processing Settings
 

@@ -54,13 +54,23 @@ notemd_core.set_settings({
     "ENABLE_STABLE_API_CALL": config.ENABLE_STABLE_API_CALL,
     "API_CALL_INTERVAL": config.API_CALL_INTERVAL,
     "API_CALL_MAX_RETRIES": config.API_CALL_MAX_RETRIES,
-    "USE_MULTI_MODEL_SETTINGS": False,
+    "USE_MULTI_MODEL_SETTINGS": config.USE_MULTI_MODEL_SETTINGS,
     "ADD_LINKS_PROVIDER": config.ADD_LINKS_PROVIDER,
     "RESEARCH_PROVIDER": config.RESEARCH_PROVIDER,
     "GENERATE_TITLE_PROVIDER": config.GENERATE_TITLE_PROVIDER,
+    "TRANSLATE_PROVIDER": config.TRANSLATE_PROVIDER,
+    "SUMMARIZE_TO_MERMAID_PROVIDER": config.SUMMARIZE_TO_MERMAID_PROVIDER,
+    "EXTRACT_CONCEPTS_PROVIDER": config.EXTRACT_CONCEPTS_PROVIDER,
+    "EXTRACT_ORIGINAL_TEXT_PROVIDER": config.EXTRACT_ORIGINAL_TEXT_PROVIDER,
+    "DIAGRAM_PROVIDER": config.DIAGRAM_PROVIDER,
     "ADD_LINKS_MODEL": config.ADD_LINKS_MODEL,
     "RESEARCH_MODEL": config.RESEARCH_MODEL,
     "GENERATE_TITLE_MODEL": config.GENERATE_TITLE_MODEL,
+    "TRANSLATE_MODEL": config.TRANSLATE_MODEL,
+    "SUMMARIZE_TO_MERMAID_MODEL": config.SUMMARIZE_TO_MERMAID_MODEL,
+    "EXTRACT_CONCEPTS_MODEL": config.EXTRACT_CONCEPTS_MODEL,
+    "EXTRACT_ORIGINAL_TEXT_MODEL": config.EXTRACT_ORIGINAL_TEXT_MODEL,
+    "DIAGRAM_MODEL": config.DIAGRAM_MODEL,
     "REMOVE_CODE_FENCES_ON_ADD_LINKS": config.REMOVE_CODE_FENCES_ON_ADD_LINKS,
     "LANGUAGE": config.LANGUAGE,
     "AVAILABLE_LANGUAGES": config.AVAILABLE_LANGUAGES,
@@ -68,12 +78,17 @@ notemd_core.set_settings({
     "CUSTOM_PROMPT_ADD_LINKS": config.CUSTOM_PROMPT_ADD_LINKS,
     "CUSTOM_PROMPT_GENERATE_TITLE": config.CUSTOM_PROMPT_GENERATE_TITLE,
     "CUSTOM_PROMPT_RESEARCH_SUMMARIZE": config.CUSTOM_PROMPT_RESEARCH_SUMMARIZE,
+    "CUSTOM_PROMPT_TRANSLATE": config.CUSTOM_PROMPT_TRANSLATE,
+    "CUSTOM_PROMPT_SUMMARIZE_TO_MERMAID": config.CUSTOM_PROMPT_SUMMARIZE_TO_MERMAID,
+    "CUSTOM_PROMPT_GENERATE_DIAGRAM": config.CUSTOM_PROMPT_GENERATE_DIAGRAM,
+    "CUSTOM_PROMPT_EXTRACT_CONCEPTS": config.CUSTOM_PROMPT_EXTRACT_CONCEPTS,
+    "CUSTOM_PROMPT_EXTRACT_ORIGINAL_TEXT": config.CUSTOM_PROMPT_EXTRACT_ORIGINAL_TEXT,
 })
 
 app = FastAPI(
     title="Notemd MCP Server",
     description="MCP server for Notemd Obsidian plugin functionalities",
-    version="0.5.0",
+    version="0.6.0",
 )
 
 class ProcessContentRequest(BaseModel):
@@ -102,6 +117,35 @@ class CustomPromptRequest(BaseModel):
     prompt: str
     content: str
     cancelled: bool = False
+
+class TranslateContentRequest(BaseModel):
+    content: str
+    target_language: str = "en"
+    cancelled: bool = False
+
+class SummarizeMermaidRequest(BaseModel):
+    content: str
+    target_language: str = "en"
+    cancelled: bool = False
+
+class GenerateDiagramRequest(BaseModel):
+    content: str
+    diagram_intent: str = "auto"
+    target_language: str = "en"
+    compatibility_mode: str = "canonical"
+    cancelled: bool = False
+
+class ExtractConceptsRequest(BaseModel):
+    content: str
+    cancelled: bool = False
+
+class ExtractOriginalTextRequest(BaseModel):
+    reference_content: str
+    user_input: str
+    cancelled: bool = False
+
+class CheckDuplicatesRequest(BaseModel):
+    content: str
 
 @app.post("/process_content", summary="Process Content (Add Links)")
 async def process_content_endpoint(request: ProcessContentRequest):
@@ -144,6 +188,139 @@ async def execute_custom_prompt_endpoint(request: CustomPromptRequest):
         return {"response": response}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal server error: {e}")
+
+@app.post("/translate_content", summary="Translate Content")
+async def translate_content_endpoint(request: TranslateContentRequest):
+    """Translate content to the target language."""
+    try:
+        translated = await notemd_core.translate_content(
+            request.content,
+            request.target_language,
+            request.cancelled
+        )
+        return {"translated_content": translated}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal server error: {e}")
+
+@app.post("/summarize_as_mermaid", summary="Summarize as Mermaid")
+async def summarize_as_mermaid_endpoint(request: SummarizeMermaidRequest):
+    """Generate a Mermaid mindmap summary from content."""
+    try:
+        summary = await notemd_core.summarize_as_mermaid(
+            request.content,
+            request.target_language,
+            request.cancelled
+        )
+        return {"mermaid_summary": summary}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal server error: {e}")
+
+@app.post("/generate_diagram", summary="Generate Diagram")
+async def generate_diagram_endpoint(request: GenerateDiagramRequest):
+    """Generate a diagram artifact from content using canonical diagram flow."""
+    try:
+        diagram = await notemd_core.generate_diagram(
+            request.content,
+            request.diagram_intent,
+            request.target_language,
+            request.compatibility_mode,
+            request.cancelled
+        )
+        return {"diagram": diagram}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal server error: {e}")
+
+@app.post("/generate_experimental_diagram", summary="Generate Experimental Diagram (Legacy Alias)")
+async def generate_experimental_diagram_endpoint(request: GenerateDiagramRequest):
+    """Legacy alias for diagram generation compatibility."""
+    try:
+        diagram = await notemd_core.generate_diagram(
+            request.content,
+            request.diagram_intent,
+            request.target_language,
+            "legacy-mermaid",
+            request.cancelled
+        )
+        return {"diagram": diagram}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal server error: {e}")
+
+@app.post("/preview_diagram", summary="Preview Diagram")
+async def preview_diagram_endpoint(request: GenerateDiagramRequest):
+    """Generate previewable diagram content (no file side effects)."""
+    try:
+        diagram = await notemd_core.generate_diagram(
+            request.content,
+            request.diagram_intent,
+            request.target_language,
+            request.compatibility_mode,
+            request.cancelled
+        )
+        return {"diagram": diagram}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal server error: {e}")
+
+@app.post("/preview_experimental_diagram", summary="Preview Experimental Diagram (Legacy Alias)")
+async def preview_experimental_diagram_endpoint(request: GenerateDiagramRequest):
+    """Legacy preview alias that normalizes to canonical preview flow."""
+    try:
+        diagram = await notemd_core.generate_diagram(
+            request.content,
+            request.diagram_intent,
+            request.target_language,
+            "legacy-mermaid",
+            request.cancelled
+        )
+        return {"diagram": diagram}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal server error: {e}")
+
+@app.post("/extract_concepts", summary="Extract Concepts")
+async def extract_concepts_endpoint(request: ExtractConceptsRequest):
+    """Extract core concepts from content."""
+    try:
+        concepts = await notemd_core.extract_concepts(request.content, request.cancelled)
+        return {"concepts": concepts}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal server error: {e}")
+
+@app.post("/extract_original_text", summary="Extract Original Text")
+async def extract_original_text_endpoint(request: ExtractOriginalTextRequest):
+    """Extract matching verbatim excerpts for user inputs."""
+    try:
+        extracted = await notemd_core.extract_original_text(
+            request.reference_content,
+            request.user_input,
+            request.cancelled
+        )
+        return {"extracted_text": extracted}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal server error: {e}")
+
+@app.post("/check_duplicates", summary="Check Duplicates")
+async def check_duplicates_endpoint(request: CheckDuplicatesRequest):
+    """Return normalized duplicate terms detected in the content."""
+    try:
+        duplicates = notemd_core.get_duplicate_words(request.content)
+        return {"duplicates": duplicates, "count": len(duplicates)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal server error: {e}")
 

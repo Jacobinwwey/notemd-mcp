@@ -95,15 +95,26 @@ ENABLE_STABLE_API_CALL = False
 API_CALL_INTERVAL = 5
 API_CALL_MAX_RETRIES = 3
 
-# Multi-model settings (simplified for now, will use active provider)
+# Multi-model settings
+USE_MULTI_MODEL_SETTINGS = False
 ADD_LINKS_PROVIDER = "DeepSeek"
 RESEARCH_PROVIDER = "DeepSeek"
 GENERATE_TITLE_PROVIDER = "DeepSeek"
+TRANSLATE_PROVIDER = "DeepSeek"
+SUMMARIZE_TO_MERMAID_PROVIDER = "DeepSeek"
+EXTRACT_CONCEPTS_PROVIDER = "DeepSeek"
+EXTRACT_ORIGINAL_TEXT_PROVIDER = "DeepSeek"
+DIAGRAM_PROVIDER = "DeepSeek"
 
 # Task-specific models (empty means use provider's default)
 ADD_LINKS_MODEL = ""
 RESEARCH_MODEL = ""
 GENERATE_TITLE_MODEL = ""
+TRANSLATE_MODEL = ""
+SUMMARIZE_TO_MERMAID_MODEL = ""
+EXTRACT_CONCEPTS_MODEL = ""
+EXTRACT_ORIGINAL_TEXT_MODEL = ""
+DIAGRAM_MODEL = ""
 
 # Post-processing settings
 REMOVE_CODE_FENCES_ON_ADD_LINKS = False
@@ -165,7 +176,7 @@ Include:
 4.  Implementation considerations with algorithmic complexity analysis (if applicable).
 5.  Performance characteristics with statistical measures.
 6.  Related technologies with comparative mathematical models. 
-7.  Mathematical equations in LaTeX format (using $$...$$ for display and $...$ for inline) with detailed explanations of all parameters and variables. Example: $$ P(f) = \int_{-\infty}^{\infty} p(t) e^{-i2\pi ft} dt $$
+7.  Mathematical equations in LaTeX format (using $$...$$ for display and $...$ for inline) with detailed explanations of all parameters and variables. Example: $$ P(f) = \\int_{-\\infty}^{\\infty} p(t) e^{-i2\\pi ft} dt $$
 8.  Mermaid.js diagram code blocks using the format ```mermaid ... ``` (IMPORTANT: without brackets "()" or "{}" for Mermaid diagrams) for complex relationships or system architectures,Enclosed node names with spaces/special characters in square brackets,which is [ and ], Avoids special LaTeX syntax and Added quotes around subgraph titles with special characters, "subgraph" and "end" cannot appear on the same line!For example:
 ```mermaid
 graph TD
@@ -261,8 +272,78 @@ graph TD
 Format directly for Obsidian markdown. Do NOT wrap the entire response in a markdown code block. Start directly with the Level 2 Header.
 """
 CUSTOM_PROMPT_RESEARCH_SUMMARIZE = """
-Summarize the following search results for the topic "{TOPIC}". Provide a concise yet comprehensive overview. Focus on key findings, data, and important conclusions. Format the summary in Markdown.
+Summarize the following search results for the topic "{TOPIC}". Provide a concise yet comprehensive overview. Focus on key findings, data, and important conclusions. Format the summary in Markdown. The output language should be {LANGUAGE}.
 
 Search Results:
 {SEARCH_RESULTS_CONTEXT}
+"""
+
+CUSTOM_PROMPT_TRANSLATE = """
+Translate the following text to {LANGUAGE}. Only output the translated text. Do not include the original text.
+Keep markdown formatting and code fences intact.
+
+Text to translate:
+{TEXT}
+"""
+
+CUSTOM_PROMPT_SUMMARIZE_TO_MERMAID = """
+You are an AI assistant specializing in text analysis and data visualization.
+Your sole task is to convert the user-provided document into a single Mermaid mindmap diagram.
+
+Critical rules:
+1. Output one Mermaid code block only.
+2. Use `mindmap` as diagram type.
+3. Do not use parentheses in node labels.
+4. Keep indentation consistent (4 spaces per level).
+5. Do not output any explanation outside the Mermaid block.
+
+Source document:
+{TEXT}
+"""
+
+CUSTOM_PROMPT_GENERATE_DIAGRAM = """
+You are a diagram generation assistant.
+Generate one Mermaid diagram from the source document.
+
+Requirements:
+- Return exactly one Mermaid code block and nothing else.
+- Preferred intent: {DIAGRAM_INTENT}
+- Target language for human-readable labels: {LANGUAGE}
+- Keep labels concise and faithful to source.
+- Choose a Mermaid structure that best matches the content (mindmap/flowchart/sequence/class/er/state).
+
+Source document:
+{TEXT}
+"""
+
+CUSTOM_PROMPT_EXTRACT_CONCEPTS = """
+You are an AI assistant specializing in concept extraction.
+Analyze markdown content and identify core concepts.
+
+Output rules:
+- Output only lines prefixed with `CONCEPT: `.
+- One concept per line.
+- No explanations or extra formatting.
+- Prefer specific multi-word technical concepts.
+- Skip references/bibliography sections.
+
+Reference content:
+{REFERENCE_CONTENT}
+"""
+
+CUSTOM_PROMPT_EXTRACT_ORIGINAL_TEXT = """
+Role & Objective:
+Map each user input query to matching verbatim excerpts in the reference content.
+
+Rules:
+- Extract text verbatim (no paraphrasing).
+- If not found, output `No match found in reference`.
+- If multiple excerpts match, include all of them.
+- Output in markdown with each query followed by bullet points of matched excerpts.
+
+Reference content:
+{REFERENCE_CONTENT}
+
+User input:
+{USER_INPUT}
 """

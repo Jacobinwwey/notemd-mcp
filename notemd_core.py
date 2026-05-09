@@ -32,12 +32,19 @@ def estimate_tokens(text: str) -> int:
 def get_provider_for_task(task_type: str) -> Optional[Dict[str, Any]]:
     provider_name = SETTINGS.get("ACTIVE_PROVIDER", "DeepSeek")
     if SETTINGS.get("USE_MULTI_MODEL_SETTINGS", False):
-        if task_type == "addLinks":
-            provider_name = SETTINGS.get("ADD_LINKS_PROVIDER", provider_name)
-        elif task_type == "research":
-            provider_name = SETTINGS.get("RESEARCH_PROVIDER", provider_name)
-        elif task_type == "generateTitle":
-            provider_name = SETTINGS.get("GENERATE_TITLE_PROVIDER", provider_name)
+        provider_key_by_task = {
+            "addLinks": "ADD_LINKS_PROVIDER",
+            "research": "RESEARCH_PROVIDER",
+            "generateTitle": "GENERATE_TITLE_PROVIDER",
+            "translate": "TRANSLATE_PROVIDER",
+            "summarizeToMermaid": "SUMMARIZE_TO_MERMAID_PROVIDER",
+            "extractConcepts": "EXTRACT_CONCEPTS_PROVIDER",
+            "extractOriginalText": "EXTRACT_ORIGINAL_TEXT_PROVIDER",
+            "diagramGenerate": "DIAGRAM_PROVIDER",
+        }
+        provider_key = provider_key_by_task.get(task_type)
+        if provider_key:
+            provider_name = SETTINGS.get(provider_key, provider_name)
 
     for p in SETTINGS.get("DEFAULT_PROVIDERS", []) :
         if p["name"] == provider_name:
@@ -47,12 +54,19 @@ def get_provider_for_task(task_type: str) -> Optional[Dict[str, Any]]:
 def get_model_for_task(task_type: str, provider_config: Dict[str, Any]) -> str:
     model_name = provider_config.get("model")
     if SETTINGS.get("USE_MULTI_MODEL_SETTINGS", False):
-        if task_type == "addLinks":
-            model_name = SETTINGS.get("ADD_LINKS_MODEL") or model_name
-        elif task_type == "research":
-            model_name = SETTINGS.get("RESEARCH_MODEL") or model_name
-        elif task_type == "generateTitle":
-            model_name = SETTINGS.get("GENERATE_TITLE_MODEL") or model_name
+        model_key_by_task = {
+            "addLinks": "ADD_LINKS_MODEL",
+            "research": "RESEARCH_MODEL",
+            "generateTitle": "GENERATE_TITLE_MODEL",
+            "translate": "TRANSLATE_MODEL",
+            "summarizeToMermaid": "SUMMARIZE_TO_MERMAID_MODEL",
+            "extractConcepts": "EXTRACT_CONCEPTS_MODEL",
+            "extractOriginalText": "EXTRACT_ORIGINAL_TEXT_MODEL",
+            "diagramGenerate": "DIAGRAM_MODEL",
+        }
+        model_key = model_key_by_task.get(task_type)
+        if model_key:
+            model_name = SETTINGS.get(model_key) or model_name
     return model_name or ""
 
 # --- Content Splitting (from utils.ts) ---
@@ -86,6 +100,38 @@ def split_content(content: str) -> List[str]:
 # --- LLM Processing Prompt (from llmUtils.ts) ---
 def get_llm_processing_prompt() -> str:
     return SETTINGS.get("CUSTOM_PROMPT_ADD_LINKS", "")
+
+def resolve_language_display_name(language_code_or_name: str) -> str:
+    if not language_code_or_name:
+        return SETTINGS.get("LANGUAGE", "en")
+
+    language = language_code_or_name.strip()
+    for item in SETTINGS.get("AVAILABLE_LANGUAGES", []):
+        if item.get("code") == language:
+            return item.get("name") or language
+    return language
+
+def strip_boxed_wrapper(content: str) -> str:
+    lines = content.split('\n')
+    if lines and lines[0].strip() == '\\boxed{':
+        lines.pop(0)
+        if lines and lines[-1].strip() == '}':
+            lines.pop()
+    return '\n'.join(lines)
+
+def apply_standard_post_processing(content: str, remove_markdown_fence: bool = False) -> str:
+    processed = cleanup_latex_delimiters(content)
+    processed = refine_mermaid_blocks(processed)
+    processed = strip_boxed_wrapper(processed)
+    if remove_markdown_fence:
+        processed = processed.replace("```markdown", "")
+    return processed.strip()
+
+def format_prompt(template: str, variables: Dict[str, str]) -> str:
+    prompt = template
+    for key, value in variables.items():
+        prompt = prompt.replace(f"{{{key}}}", value)
+    return prompt
 
 # --- LLM API Call Implementations ---
 async def execute_deepseek_api(provider_config: Dict[str, Any], model_name: str, prompt: str, content: str) -> str:
@@ -313,6 +359,9 @@ def find_duplicates(content: str) -> set[str]:
                     duplicates.add(normalized)
                 seen_words.add(normalized)
     return duplicates
+
+def get_duplicate_words(content: str) -> List[str]:
+    return sorted(find_duplicates(content))
 
 async def handle_duplicates(content: str):
     if not SETTINGS.get("ENABLE_DUPLICATE_DETECTION", True):
@@ -629,7 +678,11 @@ async def research_and_summarize(topic: str, cancelled: bool = False) -> str:
     summary_prompt_template = SETTINGS.get("CUSTOM_PROMPT_RESEARCH_SUMMARIZE")
     if not summary_prompt_template:
         raise ValueError("Custom prompt for 'Research & Summarize' is not configured.")
-    summary_prompt = summary_prompt_template.format(TOPIC=topic, SEARCH_RESULTS_CONTEXT=research_context)
+    summary_prompt = summary_prompt_template.format(
+        TOPIC=topic,
+        SEARCH_RESULTS_CONTEXT=research_context,
+        LANGUAGE=resolve_language_display_name(SETTINGS.get("LANGUAGE", "en"))
+    )
 
     summary = await call_llm_api(provider_config, model_name, summary_prompt, "", cancelled)
 
@@ -669,6 +722,172 @@ async def execute_custom_prompt(prompt: str, content: str, cancelled: bool = Fal
     llm_response = await call_llm_api(provider_config, model_name, prompt, content, cancelled)
 
     return llm_response
+
+def ensure_mermaid_code_block(content: str, fallback_header: str = "mindmap") -> str:
+    stripped = content.strip()
+    if "```mermaid" in stripped:
+        return stripped
+    if not stripped:
+        return "```mermaid\nmindmap\n    Empty\n```"
+    if stripped.startswith("graph ") or stripped.startswith("mindmap") or stripped.startswith("flowchart"):
+        return f"```mermaid\n{stripped}\n```"
+    return f"```mermaid\n{fallback_header}\n    {stripped}\n```"
+
+async def translate_content(content: str, target_language: str = "en", cancelled: bool = False) -> str:
+    if not content.strip():
+        raise ValueError("Content is empty. Cannot translate.")
+
+    provider_config = get_provider_for_task("translate")
+    if not provider_config:
+        raise ValueError("No valid LLM provider configured for the \"Translate\" task.")
+    model_name = get_model_for_task("translate", provider_config)
+
+    prompt_template = SETTINGS.get("CUSTOM_PROMPT_TRANSLATE")
+    if not prompt_template:
+        raise ValueError("Custom prompt for 'Translate' is not configured.")
+
+    language_name = resolve_language_display_name(target_language)
+    chunks = split_content(content)
+    translated_chunks: List[str] = []
+    for chunk in chunks:
+        if cancelled:
+            raise Exception("Processing cancelled by user during translation.")
+        prompt = format_prompt(prompt_template, {"LANGUAGE": language_name, "TEXT": chunk})
+        translated_chunk = await call_llm_api(provider_config, model_name, prompt, "", cancelled)
+        translated_chunks.append(translated_chunk.strip())
+
+    combined = "\n\n".join(translated_chunks)
+    return apply_standard_post_processing(combined, remove_markdown_fence=True)
+
+async def summarize_as_mermaid(content: str, target_language: str = "en", cancelled: bool = False) -> str:
+    if not content.strip():
+        raise ValueError("Content is empty. Cannot summarize as Mermaid.")
+
+    provider_config = get_provider_for_task("summarizeToMermaid")
+    if not provider_config:
+        raise ValueError("No valid LLM provider configured for the \"Summarize as Mermaid\" task.")
+    model_name = get_model_for_task("summarizeToMermaid", provider_config)
+
+    prompt_template = SETTINGS.get("CUSTOM_PROMPT_SUMMARIZE_TO_MERMAID")
+    if not prompt_template:
+        raise ValueError("Custom prompt for 'Summarize as Mermaid' is not configured.")
+
+    language_name = resolve_language_display_name(target_language)
+    prompt = format_prompt(prompt_template, {"LANGUAGE": language_name, "TEXT": content})
+    mermaid = await call_llm_api(provider_config, model_name, prompt, "", cancelled)
+    cleaned = apply_standard_post_processing(mermaid)
+    return ensure_mermaid_code_block(cleaned, fallback_header="mindmap")
+
+async def generate_diagram(
+    content: str,
+    diagram_intent: str = "auto",
+    target_language: str = "en",
+    compatibility_mode: str = "canonical",
+    cancelled: bool = False
+) -> str:
+    if not content.strip():
+        raise ValueError("Content is empty. Cannot generate diagram.")
+
+    provider_config = get_provider_for_task("diagramGenerate")
+    if not provider_config:
+        raise ValueError("No valid LLM provider configured for the \"Generate diagram\" task.")
+    model_name = get_model_for_task("diagramGenerate", provider_config)
+
+    language_name = resolve_language_display_name(target_language)
+    if compatibility_mode == "legacy-mermaid":
+        prompt_template = SETTINGS.get("CUSTOM_PROMPT_SUMMARIZE_TO_MERMAID")
+        if not prompt_template:
+            raise ValueError("Custom prompt for legacy Mermaid generation is not configured.")
+        prompt = format_prompt(prompt_template, {"LANGUAGE": language_name, "TEXT": content})
+        fallback_header = "mindmap"
+    else:
+        prompt_template = SETTINGS.get("CUSTOM_PROMPT_GENERATE_DIAGRAM")
+        if not prompt_template:
+            raise ValueError("Custom prompt for diagram generation is not configured.")
+        prompt = format_prompt(
+            prompt_template,
+            {
+                "DIAGRAM_INTENT": diagram_intent or "auto",
+                "LANGUAGE": language_name,
+                "TEXT": content,
+            }
+        )
+        fallback_header = "graph TD"
+
+    generated = await call_llm_api(provider_config, model_name, prompt, "", cancelled)
+    cleaned = apply_standard_post_processing(generated)
+    return ensure_mermaid_code_block(cleaned, fallback_header=fallback_header)
+
+def parse_concepts_from_response(response_text: str) -> List[str]:
+    concepts: List[str] = []
+    seen = set()
+    for raw_line in response_text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        match = re.match(r"^CONCEPT:\s*(.+?)\s*$", line, re.IGNORECASE)
+        if not match:
+            continue
+        concept = match.group(1).strip()
+        if not concept:
+            continue
+        normalized = concept.lower()
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        concepts.append(concept)
+    return concepts
+
+async def extract_concepts(content: str, cancelled: bool = False) -> List[str]:
+    if not content.strip():
+        raise ValueError("Content is empty. Cannot extract concepts.")
+
+    provider_config = get_provider_for_task("extractConcepts")
+    if not provider_config:
+        raise ValueError("No valid LLM provider configured for the \"Extract concepts\" task.")
+    model_name = get_model_for_task("extractConcepts", provider_config)
+
+    prompt_template = SETTINGS.get("CUSTOM_PROMPT_EXTRACT_CONCEPTS")
+    if not prompt_template:
+        raise ValueError("Custom prompt for 'Extract concepts' is not configured.")
+
+    chunks = split_content(content)
+    parsed_concepts: List[str] = []
+    seen = set()
+    for chunk in chunks:
+        if cancelled:
+            raise Exception("Processing cancelled by user during concept extraction.")
+        prompt = format_prompt(prompt_template, {"REFERENCE_CONTENT": chunk})
+        response = await call_llm_api(provider_config, model_name, prompt, "", cancelled)
+        for concept in parse_concepts_from_response(response):
+            normalized = concept.lower()
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            parsed_concepts.append(concept)
+    return parsed_concepts
+
+async def extract_original_text(reference_content: str, user_input: str, cancelled: bool = False) -> str:
+    if not reference_content.strip():
+        raise ValueError("Reference content is empty.")
+    if not user_input.strip():
+        raise ValueError("User input is empty.")
+
+    provider_config = get_provider_for_task("extractOriginalText")
+    if not provider_config:
+        raise ValueError("No valid LLM provider configured for the \"Extract original text\" task.")
+    model_name = get_model_for_task("extractOriginalText", provider_config)
+
+    prompt_template = SETTINGS.get("CUSTOM_PROMPT_EXTRACT_ORIGINAL_TEXT")
+    if not prompt_template:
+        raise ValueError("Custom prompt for 'Extract original text' is not configured.")
+
+    prompt = format_prompt(
+        prompt_template,
+        {"REFERENCE_CONTENT": reference_content, "USER_INPUT": user_input}
+    )
+    extracted = await call_llm_api(provider_config, model_name, prompt, "", cancelled)
+    return apply_standard_post_processing(extracted)
 
 # --- File Utilities ---
 
