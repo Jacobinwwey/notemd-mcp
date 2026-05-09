@@ -624,7 +624,13 @@ async def generate_content_for_title(title: str, cancelled: bool = False) -> str
     custom_prompt_template = SETTINGS.get("CUSTOM_PROMPT_GENERATE_TITLE")
     if not custom_prompt_template:
         raise ValueError("Custom prompt for 'Generate from Title' is not configured.")
-    generation_prompt = custom_prompt_template.format(TITLE=title, RESEARCH_CONTEXT_SECTION=research_context_section)
+    generation_prompt = format_prompt(
+        custom_prompt_template,
+        {
+            "TITLE": title,
+            "RESEARCH_CONTEXT_SECTION": research_context_section,
+        }
+    )
 
     target_language_name = next((lang["name"] for lang in SETTINGS.get("AVAILABLE_LANGUAGES", []) if lang["code"] == SETTINGS.get("LANGUAGE", "en")), SETTINGS.get("LANGUAGE", "en"))
     if SETTINGS.get("LANGUAGE", "en") != "en":

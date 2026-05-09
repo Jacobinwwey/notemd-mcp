@@ -1,0 +1,68 @@
+[notemd]
+# Primary provider used when USE_MULTI_MODEL_SETTINGS=false
+active_provider = "OpenAI"
+language = "en"
+search_provider = "duckduckgo" # "duckduckgo" or "tavily"
+enable_research_in_generate_content = false
+enable_stable_api_call = true
+api_call_interval = 2
+api_call_max_retries = 1
+max_tokens = 1800
+chunk_word_count = 1200
+
+[providers]
+# Fill at least the active provider key/model.
+openai_api_key = ""
+openai_model = "gpt-4.1-mini"
+
+deepseek_api_key = ""
+deepseek_model = "deepseek-chat"
+
+anthropic_api_key = ""
+anthropic_model = "claude-3-5-haiku-20241022"
+
+google_api_key = ""
+google_model = "gemini-2.0-flash"
+
+mistral_api_key = ""
+mistral_model = "mistral-large-latest"
+
+openrouter_api_key = ""
+openrouter_model = "openai/gpt-4.1-mini"
+
+# Optional (only if you use them)
+azure_openai_api_key = ""
+azure_openai_base_url = ""
+azure_openai_api_version = "2025-01-01-preview"
+azure_openai_model = "gpt-4o"
+
+ollama_model = "llama3"
+lmstudio_model = "local-model"
+
+[tavily]
+# Required only when search_provider="tavily" or when run_research_summarize=true with tavily.
+api_key = ""
+search_depth = "basic"
+max_results = 3
+
+[tests]
+# Full API surface smoke + live LLM checks
+run_llm_endpoints = true
+run_generate_title = true
+run_research_summarize = false
+target_language = "en"
+
+[test_data]
+vault_root = "/tmp/notemd-mcp-e2e-vault"
+title = "Knowledge Graph"
+topic = "Knowledge graph in markdown note systems"
+sample_markdown = """
+## Knowledge Graphs
+Knowledge graphs connect entities and relations.
+In Obsidian-style notes, links form a local graph.
+"""
+reference_content = """
+Knowledge graphs encode entities and relationships.
+Entity resolution improves deduplication quality.
+"""
+user_input = "What improves deduplication quality?"
