@@ -23,6 +23,8 @@
 -   **AI 驱动的内容增强**：自动处理 Markdown 内容，识别核心概念并创建 `[[维基链接]]`，构建一个深度互联的个人知识图谱。
 -   **自动化文档生成**：从单个标题或关键字生成全面、结构化的文档，并可选择使用网络研究来为生成提供更丰富的上下文。
 -   **集成的网络研究与摘要**：使用 Tavily 或 DuckDuckGo 执行网络搜索，并利用 LLM 为任何主题提供简洁的摘要。
+-   **图表工作流（规范名称 + 兼容别名）**：支持 `generate_diagram` 作为规范流程，同时保留 `generate_experimental_diagram` 作为兼容旧版命令面的别名。
+-   **翻译与提取工具**：提供一等支持的翻译、概念提取和原文精确提取能力，便于自动化流水线集成。
 -   **知识图谱完整性**：包含在文件重命名或删除时自动更新或移除反向链接的端点，防止出现死链接。
 -   **语法修正**：提供一个实用工具，用于批量修复 LLM 生成内容中常见的 Mermaid.js 和 LaTeX 语法错误。
 -   **高度可配置**：所有主要功能、API 密钥、文件路径和模型参数都在一个中央 `config.py` 文件中轻松管理。
@@ -53,7 +55,7 @@
 
 #### 方法一：使用 `npx` (推荐用于快速启动)
 
-这是启动服务器最简单的方法。`npx` 将临时下载并运行该包。
+这是启动服务器最简单的方法。`npx` 将临时下载并运行该包。该方式支持 **stdio 模式**，你可以在当前终端直接看到 FastAPI 服务日志。
 
 ```bash
 # 这条命令将下载包并启动服务器。
@@ -127,6 +129,15 @@ npx notemd-mcp-server
 | `/generate_title` | `POST` | 从单个标题生成完整的文档。 | `{"title": "string", "cancelled": "boolean"}` | `{"generated_content": "string"}` |
 | `/research_summarize` | `POST` | 对一个主题进行网络搜索，并返回一个由 AI 生成的摘要。 | `{"topic": "string", "cancelled": "boolean"}` | `{"summary": "string"}` |
 | `/execute_custom_prompt` | `POST` | 执行用户定义的提示与给定内容。 | `{"prompt": "string", "content": "string", "cancelled": "boolean"}` | `{"response": "string"}` |
+| `/translate_content` | `POST` | 将文本或 Markdown 翻译为目标语言。 | `{"content": "string", "target_language": "string", "cancelled": "boolean"}` | `{"translated_content": "string"}` |
+| `/summarize_as_mermaid` | `POST` | 将内容总结为 Mermaid 脑图。 | `{"content": "string", "target_language": "string", "cancelled": "boolean"}` | `{"mermaid_summary": "string"}` |
+| `/generate_diagram` | `POST` | 规范的图表生成端点。 | `{"content": "string", "diagram_intent": "string", "target_language": "string", "compatibility_mode": "string", "cancelled": "boolean"}` | `{"diagram": "string"}` |
+| `/generate_experimental_diagram` | `POST` | 图表生成的旧版兼容别名。 | `{"content": "string", "diagram_intent": "string", "target_language": "string", "cancelled": "boolean"}` | `{"diagram": "string"}` |
+| `/preview_diagram` | `POST` | 规范的图表预览端点（无文件副作用）。 | `{"content": "string", "diagram_intent": "string", "target_language": "string", "compatibility_mode": "string", "cancelled": "boolean"}` | `{"diagram": "string"}` |
+| `/preview_experimental_diagram` | `POST` | 图表预览的旧版兼容别名。 | `{"content": "string", "diagram_intent": "string", "target_language": "string", "cancelled": "boolean"}` | `{"diagram": "string"}` |
+| `/extract_concepts` | `POST` | 提取去重后的核心概念列表。 | `{"content": "string", "cancelled": "boolean"}` | `{"concepts": ["..."]}` |
+| `/extract_original_text` | `POST` | 从参考内容中提取与用户输入对应的原文片段。 | `{"reference_content": "string", "user_input": "string", "cancelled": "boolean"}` | `{"extracted_text": "string"}` |
+| `/check_duplicates` | `POST` | 返回内容中归一化后的重复词条。 | `{"content": "string"}` | `{"duplicates": ["..."], "count": 0}` |
 | `/handle_file_rename` | `POST` | 当文件被重命名时，更新 vault 中的所有反向链接。 | `{"old_path": "string", "new_path": "string"}` | `{"status": "success"}` |
 | `/handle_file_delete` | `POST` | 当文件被删除时，移除所有指向该文件的反向链接。 | `{"path": "string"}` | `{"status": "success"}` |
 | `/batch_fix_mermaid` | `POST` | 扫描一个文件夹并修正 `.md` 文件中常见的 Mermaid.js 和 LaTeX 语法错误。 | `{"folder_path": "string"}` | `{"errors": [], "modified_count": "integer"}` |
@@ -184,9 +195,15 @@ npx notemd-mcp-server
 -   `ADD_LINKS_PROVIDER`：用于 `process_content`（添加链接）操作的 LLM 提供商。
 -   `RESEARCH_PROVIDER`：用于 `research_summarize` 操作的 LLM 提供商。
 -   `GENERATE_TITLE_PROVIDER`：用于 `generate_title` 操作的 LLM 提供商。
+-   `TRANSLATE_PROVIDER`：用于 `translate_content` 操作的 LLM 提供商。
+-   `SUMMARIZE_TO_MERMAID_PROVIDER`：用于 `summarize_as_mermaid` 操作的 LLM 提供商。
+-   `EXTRACT_CONCEPTS_PROVIDER`：用于 `extract_concepts` 操作的 LLM 提供商。
+-   `EXTRACT_ORIGINAL_TEXT_PROVIDER`：用于 `extract_original_text` 操作的 LLM 提供商。
+-   `DIAGRAM_PROVIDER`：用于 `generate_diagram` 操作的 LLM 提供商。
 -   `ADD_LINKS_MODEL`：用于添加链接的特定模型（如果设置，则覆盖提供商的默认值）。
 -   `RESEARCH_MODEL`：用于研究的特定模型（如果设置，则覆盖提供商的默认值）。
 -   `GENERATE_TITLE_MODEL`：用于标题生成的特定模型（如果设置，则覆盖提供商的默认值）。
+-   `TRANSLATE_MODEL`、`SUMMARIZE_TO_MERMAID_MODEL`、`EXTRACT_CONCEPTS_MODEL`、`EXTRACT_ORIGINAL_TEXT_MODEL`、`DIAGRAM_MODEL`：上述任务的模型覆盖项。
 
 ### 后处理设置
 
@@ -205,8 +222,32 @@ npx notemd-mcp-server
 -   `CUSTOM_PROMPT_ADD_LINKS`：`process_content`（添加链接）操作的自定义提示字符串。
 -   `CUSTOM_PROMPT_GENERATE_TITLE`：`generate_title` 操作的自定义提示字符串。
 -   `CUSTOM_PROMPT_RESEARCH_SUMMARIZE`：`research_summarize` 操作的自定义提示字符串。
+-   `CUSTOM_PROMPT_TRANSLATE`：`translate_content` 操作的自定义提示字符串。
+-   `CUSTOM_PROMPT_SUMMARIZE_TO_MERMAID`：`summarize_as_mermaid` 操作的自定义提示字符串。
+-   `CUSTOM_PROMPT_GENERATE_DIAGRAM`：`generate_diagram` 操作的自定义提示字符串。
+-   `CUSTOM_PROMPT_EXTRACT_CONCEPTS`：`extract_concepts` 操作的自定义提示字符串。
+-   `CUSTOM_PROMPT_EXTRACT_ORIGINAL_TEXT`：`extract_original_text` 操作的自定义提示字符串。
+
+## 发布（npm + PyPI）
+
+使用下面这条单行命令，可以一次性把 npm 和 PyPI 发布到同一个版本：
+
+```bash
+npm run release:sync-publish -- 0.6.1
+```
+
+仅演练（不真正发布）：
+
+```bash
+npm run release:sync-publish -- 0.6.1 --dry-run
+```
+
+说明：
+
+-   该命令会先更新 npm 版本（`package.json` + `package-lock.json`），再同步 `setup.py`、`main.py`、`cli.js` 的版本号。
+-   请先准备好 npm 鉴权（`npm login` 或 `NPM_TOKEN`）和 PyPI 鉴权（`~/.pypirc` 或 `TWINE_USERNAME` + `TWINE_PASSWORD`）。
+-   命令会先构建 Python 包并执行 `twine check`，再执行上传。
 
 ## 许可证
 
 本项目根据 MIT 许可证授权。有关详细信息，请参阅 `LICENSE` 文件。
-

@@ -224,6 +224,31 @@ These settings allow you to enable and define custom prompts for various operati
 -   `CUSTOM_PROMPT_ADD_LINKS`: Custom prompt string for the `process_content` (add links) operation.
 -   `CUSTOM_PROMPT_GENERATE_TITLE`: Custom prompt string for the `generate_title` operation.
 -   `CUSTOM_PROMPT_RESEARCH_SUMMARIZE`: Custom prompt string for the `research_summarize` operation.
+-   `CUSTOM_PROMPT_TRANSLATE`: Custom prompt string for `translate_content`.
+-   `CUSTOM_PROMPT_SUMMARIZE_TO_MERMAID`: Custom prompt string for `summarize_as_mermaid`.
+-   `CUSTOM_PROMPT_GENERATE_DIAGRAM`: Custom prompt string for `generate_diagram`.
+-   `CUSTOM_PROMPT_EXTRACT_CONCEPTS`: Custom prompt string for `extract_concepts`.
+-   `CUSTOM_PROMPT_EXTRACT_ORIGINAL_TEXT`: Custom prompt string for `extract_original_text`.
+
+## Release (npm + PyPI)
+
+Use this one-line command to bump one shared version and publish both npm and PyPI in sync:
+
+```bash
+npm run release:sync-publish -- 0.6.1
+```
+
+Dry-run (no publish):
+
+```bash
+npm run release:sync-publish -- 0.6.1 --dry-run
+```
+
+Notes:
+
+-   The command updates npm version (`package.json` + `package-lock.json`), and syncs Python/server versions in `setup.py`, `main.py`, and `cli.js`.
+-   Make sure npm auth is ready (`npm login` or `NPM_TOKEN`) and PyPI auth is ready (`~/.pypirc` or `TWINE_USERNAME` + `TWINE_PASSWORD`).
+-   It builds Python artifacts and runs `twine check` before upload.
 
 ## License
 

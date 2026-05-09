@@ -1,14 +1,16 @@
 {
   "name": "notemd-mcp-server",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "A standalone backend server for the Notemd Obsidian plugin, providing AI-powered text processing and knowledge management.",
   "type": "module",
   "main": "cli.js",
   "bin": {
-    "notemd-mcp": "./cli.js"
+    "notemd-mcp": "cli.js"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "version:sync": "python3 scripts/set_release_version.py",
+    "release:sync-publish": "bash scripts/release_sync_publish.sh"
   },
   "keywords": [
     "notemd",

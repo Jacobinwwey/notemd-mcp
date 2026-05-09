@@ -88,7 +88,7 @@ notemd_core.set_settings({
 app = FastAPI(
     title="Notemd MCP Server",
     description="MCP server for Notemd Obsidian plugin functionalities",
-    version="0.6.0",
+    version="0.6.1",
 )
 
 class ProcessContentRequest(BaseModel):

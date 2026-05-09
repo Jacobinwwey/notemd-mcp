@@ -42,7 +42,7 @@ function runCommand(command, args, options = {}) {
 class NotemdMcpServer {
     constructor() {
         this.mcp_server = new Server(
-            { name: "notemd-mcp", version: "0.6.0" },
+            { name: "notemd-mcp", version: "0.6.1" },
             { capabilities: { tools: {} } }
         );
         this.setupToolHandlers();
