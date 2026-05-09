@@ -398,32 +398,52 @@ async def search_duckduckgo(query: str) -> List[Dict[str, str]]:
         print(f"Received HTML response from DuckDuckGo ({len(html_content)} bytes). Parsing...")
 
         parser = HTMLParser(html_content)
-        for node in parser.css('.result--html'):
-            if len(results) >= max_results: break
+        candidate_nodes = parser.css('.result--html') or parser.css('.result__body') or parser.css('.result')
+        for node in candidate_nodes:
+            if len(results) >= max_results:
+                break
 
             link_node = node.css_first('.result__a')
             snippet_node = node.css_first('.result__snippet')
+            if not link_node:
+                continue
 
-            if link_node and snippet_node:
+            link = link_node.attributes.get('href')
+            title = link_node.text(strip=True)
+            snippet = snippet_node.text(strip=True) if snippet_node else ""
+
+            if link and title:
+                if link.startswith('/l/?uddg='):
+                    parsed_url = urlparse(link)
+                    decoded_link = parse_qs(parsed_url.query).get('uddg', [None])[0]
+                    if decoded_link:
+                        link = decoded_link
+                    else:
+                        print(f"Warning: Could not decode DDG redirect URL: {link}")
+                        link = f"https://duckduckgo.com{link}"
+                elif not link.startswith('http'):
+                    link = f"https://duckduckgo.com{link}"
+
+                results.append({"title": title, "url": link, "content": snippet or title})
+            else:
+                print(f"Warning: Skipping partially parsed result (Title: {bool(title)}, Link: {bool(link)})")
+
+        # Fallback: extract direct anchors when container selectors change.
+        if not results:
+            for link_node in parser.css('a.result__a'):
+                if len(results) >= max_results:
+                    break
                 link = link_node.attributes.get('href')
                 title = link_node.text(strip=True)
-                snippet = snippet_node.text(strip=True)
-
-                if link and title and snippet:
-                    if link.startswith('/l/?uddg='):
-                        parsed_url = urlparse(link)
-                        decoded_link = parse_qs(parsed_url.query).get('uddg', [None])[0]
-                        if decoded_link:
-                            link = decoded_link
-                        else:
-                            print(f"Warning: Could not decode DDG redirect URL: {link}")
-                            link = f"https://duckduckgo.com{link}"
-                    elif not link.startswith('http'):
-                        link = f"https://duckduckgo.com{link}"
-
-                    results.append({"title": title, "url": link, "content": snippet})
-                else:
-                    print(f"Warning: Skipping partially parsed result (Title: {bool(title)}, Link: {bool(link)}, Snippet: {bool(snippet)})")
+                if not link or not title:
+                    continue
+                if link.startswith('/l/?uddg='):
+                    parsed_url = urlparse(link)
+                    decoded_link = parse_qs(parsed_url.query).get('uddg', [None])[0]
+                    link = decoded_link or link
+                elif not link.startswith('http'):
+                    link = f"https://duckduckgo.com{link}"
+                results.append({"title": title, "url": link, "content": title})
 
         if not results:
             print("Warning: Could not parse any valid results from DuckDuckGo HTML.")
