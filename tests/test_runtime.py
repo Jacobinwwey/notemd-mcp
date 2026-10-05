@@ -92,6 +92,17 @@ class AsyncRuntimeTests(unittest.IsolatedAsyncioTestCase):
         with patch.dict(core.API_CALL_FUNCTIONS, {'test': AsyncMock(return_value='````markdown\n' + body + '\n````')}):
             self.assertEqual(await core.process_content('Source'), body)
 
+    async def test_research_html_parser_preserves_search_and_body_extraction(self):
+        search = '<div class="result"><a class="result__a" href="/l/?uddg=https%3A%2F%2Fexample.invalid%2Farticle">Title</a><div class="result__snippet">Summary</div></div>'
+        article = '<html><body><script>secret()</script><style>.x{}</style><h1>Title</h1><p>Body text</p></body></html>'
+        for html, operation, expected in [
+            (search, core.search_duckduckgo, [{'title': 'Title', 'url': 'https://example.invalid/article', 'content': 'Summary'}]),
+            (article, core.fetch_content_from_url, 'Title Body text'),
+        ]:
+            client = httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(200, text=html, headers={'content-type': 'text/html'})))
+            with patch('notemd_core.httpx.AsyncClient', return_value=client):
+                self.assertEqual(await operation('https://example.invalid/article'), expected)
+
     async def test_batch_preserves_bytes_and_failed_replace_keeps_source(self):
         with tempfile.TemporaryDirectory(prefix='notemd-regression-') as directory:
             path = Path(directory) / 'note.md'

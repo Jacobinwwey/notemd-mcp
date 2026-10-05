@@ -10,7 +10,7 @@ import asyncio
 import tempfile
 from typing import List, Dict, Any, Optional
 from urllib.parse import urlparse, parse_qs, quote
-from selectolax.parser import HTMLParser
+from selectolax.lexbor import LexborHTMLParser
 from markdown_processing import cleanup_latex_delimiters, ensure_mermaid_code_block, refine_mermaid_blocks, unwrap_markdown_response
 
 logger = logging.getLogger(__name__)
@@ -339,7 +339,7 @@ async def search_duckduckgo(query: str) -> List[Dict[str, str]]:
         html_content = response.text
         logger.info(f"Received HTML response from DuckDuckGo ({len(html_content)} bytes). Parsing...")
 
-        parser = HTMLParser(html_content)
+        parser = LexborHTMLParser(html_content)
         candidate_nodes = parser.css('.result--html') or parser.css('.result__body') or parser.css('.result')
         for node in candidate_nodes:
             if len(results) >= max_results:
@@ -412,7 +412,7 @@ async def fetch_content_from_url(url: str) -> str:
             logger.info(f"Skipping non-HTML content ({content_type}) from: {url}")
             return f"[Content skipped: Not HTML - {content_type}]"
 
-        parser = HTMLParser(response.text)
+        parser = LexborHTMLParser(response.text)
         if parser.body is None:
             return "[Content skipped: No body tag found]"
         for script in parser.css('script'): script.decompose()

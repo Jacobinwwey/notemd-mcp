@@ -26,5 +26,5 @@ jobs:
       - run: npm test
       - run: npm run test:python
       - run: python -m pip wheel . --no-deps --no-build-isolation --wheel-dir artifacts
-      - run: python scripts/verify-wheel.py artifacts/notemd_mcp-0.6.1-py3-none-any.whl
+      - run: python scripts/verify-wheel.py
       - run: npm pack --dry-run

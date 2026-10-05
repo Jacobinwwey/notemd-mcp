@@ -19,6 +19,8 @@ Useful source contracts are conservative normalization, asynchronous cancellatio
 
 Final review reproduced a label-repair preservation bug in the sibling skills project and added the corresponding indented-code protection here. It also found Google keys in HTTP request URLs, Windows read-only staging residue, and a symlink-entry startup regression. Keys now use the supported request header, read-only input is rejected before staging, and CLI launch detection compares the real entry path.
 
+Clean CI also exposed selectolax 1.0 removing its deprecated Modest parser. Research now uses the supported Lexbor backend, with a dependency range covering compatible 0.3.x through 1.x and a production-function regression for search results and body extraction.
+
 ## Compatibility
 
 HTTP route names, MCP tool names/aliases and existing response fields remain stable. The public `cancelled` boolean means pre-cancellation, not a live cancellation token. Python task cancellation works; SDK request cancellation is not connected through the HTTP bridge yet.
@@ -39,7 +41,7 @@ Staged replacement catches source changes before commit but is not a filesystem-
 ## Validation and delivery
 
 - `npm test`: 4 tests passed for compatible tool routing, protocol errors, child log isolation, sensitive-response omission and npm-style symlink entry.
-- `npm run test:python`: 13 tests passed for production processing, Markdown protection, transient retry, nonblocking cancellation, write failures/read-only cleanup, Google credential transport and configuration log redaction.
+- `npm run test:python`: 14 tests passed for production processing, Markdown protection, transient retry, nonblocking cancellation, write failures/read-only cleanup, Google credential transport, HTML research extraction and configuration log redaction.
 - Newly added edge-case regressions failed before fixes and passed afterward.
 - Python wheel built and installed outside the checkout; all four modules and the console entry resolved from the installed artifact.
 - npm package contents include both new runtime modules. Source-distribution manifest includes requirements.

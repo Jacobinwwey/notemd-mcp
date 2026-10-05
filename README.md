@@ -27,6 +27,7 @@ The current source branch includes a reliability upgrade after published 0.6.1. 
 - Markdown cleanup preserves labels, diagram families, nested/long/tilde fences, code, escaped currency and line endings. It removes only a complete outer Markdown response envelope. It does not parse or render Mermaid; unsupported syntax remains available for review.
 - Batch syntax repair stages a complete file, checks that the source has not changed, and replaces it only when needed. Symlink files are skipped; read-only files and write failures are reported without claiming success.
 - Retry waits yield to other requests and apply only to transient HTTP/transport failures. The public `cancelled` flag supports pre-cancellation; native Python task cancellation propagates. MCP request cancellation is not yet connected end to end.
+- Research HTML extraction uses selectolax's supported Lexbor backend, including compatibility with selectolax 1.x; search links, snippets and body extraction are covered by mocked-transport tests.
 - MCP stdout contains protocol messages only; Python/pip and task logs go to stderr. Configuration values and backend response bodies are excluded from bridge diagnostics. Google credentials travel in headers, not request URLs.
 - The bridge binds its backend to `127.0.0.1:8000` and verifies a per-process health identifier. Direct `python main.py` / installed `notemd-mcp` HTTP execution defaults to loopback; set `NOTEMD_HOST` and `NOTEMD_PORT` explicitly for a different binding. Remote HTTP access requires deployment-level authentication.
 

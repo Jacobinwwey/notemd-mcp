@@ -5,7 +5,10 @@ import sys
 import tempfile
 import zipfile
 
-wheel = Path(sys.argv[1]).resolve()
+wheel_paths = [Path(sys.argv[1])] if len(sys.argv) == 2 else list(Path('artifacts').glob('*.whl'))
+if len(sys.argv) > 2 or len(wheel_paths) != 1:
+    raise SystemExit('Pass one wheel path, or leave exactly one wheel in artifacts/.')
+wheel = wheel_paths[0].resolve()
 with zipfile.ZipFile(wheel) as archive:
     required = {'main.py', 'notemd_core.py', 'config.py', 'markdown_processing.py'}
     if not required.issubset(archive.namelist()):

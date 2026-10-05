@@ -3,5 +3,5 @@ uvicorn
 python-multipart
 httpx
 requests
-selectolax
+selectolax>=0.3.21,<2
 beautifulsoup4
