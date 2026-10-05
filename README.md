@@ -1,4 +1,4 @@
-# Notemd MCP (Mission Control Platform) Server
+# Notemd MCP (Model Context Protocol) Server
 
 ```
 ==================================================
@@ -19,6 +19,20 @@ Welcome to the Notemd MCP Server! This project provides a powerful, standalone b
 Built with Python and FastAPI, this server allows you to offload heavy computational tasks from the client and provides a robust API to interact with your knowledge base programmatically.
 
 ## Features
+
+### Source upgrade from Obsidian NotEMD 1.9.12
+
+The current source branch includes a reliability upgrade after published 0.6.1. It does not replace an existing npm/PyPI release. To use these changes, clone this repository, run `npm ci` and `python -m pip install -r requirements.txt`, then configure your MCP client to run `node` with the absolute path to `cli.js`.
+
+- Markdown cleanup preserves labels, diagram families, nested/long/tilde fences, code, escaped currency and line endings. It removes only a complete outer Markdown response envelope. It does not parse or render Mermaid; unsupported syntax remains available for review.
+- Batch syntax repair stages a complete file, checks that the source has not changed, and replaces it only when needed. Symlink files are skipped; read-only files and write failures are reported without claiming success.
+- Retry waits yield to other requests and apply only to transient HTTP/transport failures. The public `cancelled` flag supports pre-cancellation; native Python task cancellation propagates. MCP request cancellation is not yet connected end to end.
+- MCP stdout contains protocol messages only; Python/pip and task logs go to stderr. Configuration values and backend response bodies are excluded from bridge diagnostics. Google credentials travel in headers, not request URLs.
+- The bridge binds its backend to `127.0.0.1:8000` and verifies a per-process health identifier. Direct `python main.py` / installed `notemd-mcp` HTTP execution defaults to loopback; set `NOTEMD_HOST` and `NOTEMD_PORT` explicitly for a different binding. Remote HTTP access requires deployment-level authentication.
+
+`generate_diagram` still returns Mermaid text. SVG/PDF rendering and Obsidian's diagnostics disclosure UI are host capabilities, not endpoints in this server. Backlink rename/delete operations retain their existing behavior; transactional writes, vault containment and partial-failure reporting for those operations remain separate work.
+
+Verification: `npm test`, `npm run test:python`, `python -m pip wheel . --no-deps --wheel-dir artifacts`, then `python scripts/verify-wheel.py artifacts/notemd_mcp-0.6.1-py3-none-any.whl`. Tests use production modules and mock provider transport; no live LLM calls are needed. See the [migration analysis and evidence](docs/plans/2026-10-05-portable-migration.md).
 
 -	**AI-Powered Content Enrichment**: Automatically processes Markdown content to identify key concepts and create `[[wiki-links]]`, building a deeply interconnected knowledge graph.
 -	**Automated Documentation Generation**: Generates comprehensive, structured documentation from a single title or keyword, optionally using web research for context.
@@ -46,8 +60,8 @@ Follow these steps to get the Notemd MCP server up and running on your local mac
 
 ### Prerequisites
 
--	**For Python execution**: Python 3.8+ and `pip` or `uv`.
--	**For NPX execution**: Node.js and `npx`.
+-	**For Python execution**: Python 3.10+ and `pip` or `uv`.
+-	**For NPX execution**: Node.js 22.19+ and `npx`, plus Python on PATH.
 
 ### Installation & Running
 
@@ -55,7 +69,7 @@ Choose the method that best fits your workflow.
 
 #### Method 1: Using `npx` (Recommended for Quick Start)
 
-This is the simplest way to start the server. `npx` will temporarily download and run the package. This method now supports **stdio mode**, meaning you will see the FastAPI server logs directly in your terminal.
+`npx` downloads the published package, which may lag behind the source upgrade above. In the updated source, **stdio mode** reserves stdout for MCP protocol messages and sends backend logs to stderr.
 
 ```bash
 # This single command will download the package and start the server.
@@ -68,7 +82,7 @@ This method is for users who want to clone the repository and manage the files l
 
 1.	**Clone the repository:**
     ```bash
-    git clone https://github.com/your-repo/notemd-mcp.git
+    git clone https://github.com/Jacobinwwey/notemd-mcp.git
     cd notemd-mcp
     ```
 
@@ -87,19 +101,18 @@ This method is for users who want to clone the repository and manage the files l
 
 3.	**Run the server:**
     ```bash
-    uvicorn main:app --reload
+    python main.py
     ```
 
 #### Method 3: MCP Configuration
 
-To integrate Notemd MCP with your Mission Control Platform (MCP) setup, add the following to the `mcpServers` object in your `settings.json` file:
+To integrate the published package with your Model Context Protocol (MCP) client, add the following to the `mcpServers` object in its configuration:
 
 ```json
  {
    "mcpServers": {
      "notemd-mcp": {
-       "description": "Notemd MCP Server - AI-powered text processing and knowledge management
- for your Markdown files.",
+       "description": "Notemd MCP Server - text processing for Markdown files.",
        "command": "npx",
        "args": [
          "-y",

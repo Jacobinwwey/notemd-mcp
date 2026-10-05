@@ -7,26 +7,31 @@ import json
 import base64
 import os
 import binascii
+import logging
+import sys
 
 import config
 import notemd_core
+
+logging.basicConfig(level=logging.INFO, stream=sys.stderr)
+logger = logging.getLogger(__name__)
 
 def apply_user_config():
     """Applies user configuration from an environment variable."""
     config_str = os.environ.get('NOTEMD_CONFIG')
     if config_str:
-        print("Found configuration in environment variable. Applying...")
+        logger.info("Found configuration in environment variable. Applying...")
         try:
             decoded_config = base64.b64decode(config_str).decode('utf-8')
             user_config = json.loads(decoded_config)
             for key, value in user_config.items():
                 if hasattr(config, key):
-                    print(f"Overriding config: {key} = {value}")
+                    logger.info("Overriding config key: %s", key)
                     setattr(config, key, value)
-        except (json.JSONDecodeError, binascii.Error, Exception) as e:
-            print(f"Error processing config from environment variable: {e}")
+        except Exception as e:
+            logger.error("Unable to apply environment configuration: %s", type(e).__name__)
     else:
-        print("No custom configuration found in environment variables.")
+        logger.info("No custom configuration found in environment variables.")
 
 # Apply config when module is loaded
 apply_user_config()
@@ -356,11 +361,12 @@ async def batch_fix_mermaid_endpoint(request: BatchFixMermaidRequest):
 @app.get("/health", summary="Health Check")
 async def health_check():
     """Check if the server is running."""
-    return {"status": "ok"}
+    instance_id = os.environ.get('NOTEMD_INSTANCE_ID')
+    return {"status": "ok", **({"instance_id": instance_id} if instance_id else {})}
 
 def start_server():
     """Starts the uvicorn server."""
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run(app, host=os.environ.get('NOTEMD_HOST', '127.0.0.1'), port=int(os.environ.get('NOTEMD_PORT', '8000')))
 
 if __name__ == "__main__":
     start_server()

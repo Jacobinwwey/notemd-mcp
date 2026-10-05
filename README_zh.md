@@ -1,4 +1,4 @@
-# Notemd MCP (任务控制平台) 服务器
+# Notemd MCP（模型上下文协议）服务器
 
 ```
 ==================================================
@@ -19,6 +19,20 @@
 [English](./README.md) | [简体中文](./README_zh.md)
 
 ## 功能特性
+
+### 基于 Obsidian NotEMD 1.9.12 的源码升级
+
+当前源码在已发布的 0.6.1 之后增加了可靠性改进，不替换现有 npm/PyPI 发布包。使用这些改进时，请克隆仓库，运行 `npm ci` 和 `python -m pip install -r requirements.txt`，然后在 MCP 客户端中配置 `node` 命令，并传入 `cli.js` 的绝对路径。
+
+- Markdown 清理保留标签、图表类型、嵌套/长/波浪号围栏、代码、转义金额与换行符，只剥离完整的外层 Markdown 响应包装。这里不解析或渲染 Mermaid；无法处理的语法保留供审阅。
+- 批量语法修复先写完整候选文件，检查源文件未被改动，再按需替换。跳过符号链接文件；只读文件及写入失败会明确报告，不视为成功。
+- 重试等待不会阻塞其他请求，只重试暂态 HTTP/传输故障。公开的 `cancelled` 参数用于执行前取消；Python 原生任务取消会继续传播。MCP 请求取消尚未端到端接通。
+- MCP stdout 仅承载协议消息；Python/pip 和任务日志写入 stderr。桥接诊断不输出配置值或后端响应正文；Google 密钥通过请求头传递，不放入 URL。
+- 桥接后端绑定 `127.0.0.1:8000`，并核对每次启动的健康检查标识。直接运行 `python main.py` 或安装后的 `notemd-mcp` HTTP 入口时，默认也绑定本机；可显式设置 `NOTEMD_HOST`、`NOTEMD_PORT`。对外开放 HTTP 时需要部署层的身份验证。
+
+`generate_diagram` 仍返回 Mermaid 文本。SVG/PDF 渲染和 Obsidian 的诊断折叠界面属于宿主能力，不是本服务器的端点。反向链接重命名/删除保留既有行为；这些操作的事务写入、仓库目录边界和部分失败报告需要另行完善。
+
+验证命令：`npm test`、`npm run test:python`、`python -m pip wheel . --no-deps --wheel-dir artifacts`，然后运行 `python scripts/verify-wheel.py artifacts/notemd_mcp-0.6.1-py3-none-any.whl`。测试直接使用生产模块并模拟提供商传输，不需要真实 LLM 调用。详见[迁移分析与验证记录](docs/plans/2026-10-05-portable-migration.zh-CN.md)。
 
 -   **AI 驱动的内容增强**：自动处理 Markdown 内容，识别核心概念并创建 `[[维基链接]]`，构建一个深度互联的个人知识图谱。
 -   **自动化文档生成**：从单个标题或关键字生成全面、结构化的文档，并可选择使用网络研究来为生成提供更丰富的上下文。
@@ -46,8 +60,8 @@
 
 ### 先决条件
 
--   **对于 Python 执行**：Python 3.8+ 和 `pip` 或 `uv`。
--   **对于 NPX 执行**：Node.js 和 `npx`。
+-   **对于 Python 执行**：Python 3.10+ 和 `pip` 或 `uv`。
+-   **对于 NPX 执行**：Node.js 22.19+ 和 `npx`，并确保 PATH 中有 Python。
 
 ### 安装与运行
 
@@ -55,7 +69,7 @@
 
 #### 方法一：使用 `npx` (推荐用于快速启动)
 
-这是启动服务器最简单的方法。`npx` 将临时下载并运行该包。该方式支持 **stdio 模式**，你可以在当前终端直接看到 FastAPI 服务日志。
+`npx` 下载已发布的软件包，其功能可能落后于上面的源码升级。更新后的源码在 **stdio 模式** 下将 stdout 留给 MCP 协议消息，后端日志写入 stderr。
 
 ```bash
 # 这条命令将下载包并启动服务器。
@@ -68,7 +82,7 @@ npx notemd-mcp-server
 
 1.  **克隆代码仓库：**
     ```bash
-    git clone https://github.com/your-repo/notemd-mcp.git
+    git clone https://github.com/Jacobinwwey/notemd-mcp.git
     cd notemd-mcp
     ```
 
@@ -87,12 +101,12 @@ npx notemd-mcp-server
 
 3.  **运行服务器：**
     ```bash
-    uvicorn main:app --reload
+    python main.py
     ```
 
 #### 方法三：MCP 配置
 
-要将 Notemd MCP 与您的任务控制平台 (MCP) 设置集成，请将以下内容添加到 `settings.json` 文件中的 `mcpServers` 对象：
+要将已发布的软件包接入支持模型上下文协议（MCP）的客户端，请将以下内容添加到客户端配置的 `mcpServers` 对象：
 
 ```json
  {

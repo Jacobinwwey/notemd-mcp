@@ -1,0 +1,11 @@
+node_modules/
+.venv/
+venv/
+__pycache__/
+.cache/
+build/
+dist/
+*.tgz
+artifacts/
+*.egg-info/
+*.whl

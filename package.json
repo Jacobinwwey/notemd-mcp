@@ -3,12 +3,14 @@
   "version": "0.6.1",
   "description": "A standalone backend server for the Notemd Obsidian plugin, providing AI-powered text processing and knowledge management.",
   "type": "module",
+  "engines": { "node": ">=22.19.0" },
   "main": "cli.js",
   "bin": {
     "notemd-mcp": "cli.js"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "node --test tests/*.test.js",
+    "test:python": "python -m unittest discover -s tests -p test_*.py",
     "version:sync": "python3 scripts/set_release_version.py",
     "release:sync-publish": "bash scripts/release_sync_publish.sh"
   },
@@ -24,6 +26,8 @@
   "license": "MIT",
   "files": [
     "cli.js",
+    "process-output.js",
+    "markdown_processing.py",
     "main.py",
     "notemd_core.py",
     "config.py",

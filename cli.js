@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 
-import { spawn } from 'child_process';
+import { spawnLoggedProcess } from './process-output.js';
+import { randomUUID } from 'node:crypto';
+import { realpathSync } from 'node:fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import axios from 'axios';
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
@@ -16,7 +18,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const FASTAPI_PORT = 8000;
-const FASTAPI_URL = `http://localhost:${FASTAPI_PORT}`;
+const FASTAPI_URL = `http://127.0.0.1:${FASTAPI_PORT}`;
 
 const fastapiClient = axios.create({
     baseURL: FASTAPI_URL,
@@ -25,7 +27,7 @@ const fastapiClient = axios.create({
 
 function runCommand(command, args, options = {}) {
     return new Promise((resolve, reject) => {
-        const proc = spawn(command, args, { stdio: 'inherit', ...options });
+        const proc = spawnLoggedProcess(command, args, options);
         proc.on('close', (code) => {
             if (code !== 0) {
                 reject(new Error(`Command failed with exit code ${code}: ${command} ${args.join(' ')}`));
@@ -39,8 +41,9 @@ function runCommand(command, args, options = {}) {
     });
 }
 
-class NotemdMcpServer {
-    constructor() {
+export class NotemdMcpServer {
+    constructor(apiClient = fastapiClient) {
+        this.apiClient = apiClient;
         this.mcp_server = new Server(
             { name: "notemd-mcp", version: "0.6.1" },
             { capabilities: { tools: {} } }
@@ -270,65 +273,65 @@ class NotemdMcpServer {
         try {
             switch (tool_name) {
                 case "process_content":
-                    responseData = await fastapiClient.post('/process_content', args);
+                    responseData = await this.apiClient.post('/process_content', args);
                     return { content: [{ type: "text", text: responseData.data.processed_content }] };
                 case "generate_title":
-                    responseData = await fastapiClient.post('/generate_title', args);
+                    responseData = await this.apiClient.post('/generate_title', args);
                     return { content: [{ type: "text", text: responseData.data.generated_content }] };
                 case "research_summarize":
-                    responseData = await fastapiClient.post('/research_summarize', args);
+                    responseData = await this.apiClient.post('/research_summarize', args);
                     return { content: [{ type: "text", text: responseData.data.summary }] };
                 case "execute_custom_prompt":
-                    responseData = await fastapiClient.post('/execute_custom_prompt', args);
+                    responseData = await this.apiClient.post('/execute_custom_prompt', args);
                     return { content: [{ type: "text", text: responseData.data.response }] };
                 case "translate_content":
-                    responseData = await fastapiClient.post('/translate_content', args);
+                    responseData = await this.apiClient.post('/translate_content', args);
                     return { content: [{ type: "text", text: responseData.data.translated_content }] };
                 case "summarize_as_mermaid":
-                    responseData = await fastapiClient.post('/summarize_as_mermaid', args);
+                    responseData = await this.apiClient.post('/summarize_as_mermaid', args);
                     return { content: [{ type: "text", text: responseData.data.mermaid_summary }] };
                 case "generate_diagram":
-                    responseData = await fastapiClient.post('/generate_diagram', args);
+                    responseData = await this.apiClient.post('/generate_diagram', args);
                     return { content: [{ type: "text", text: responseData.data.diagram }] };
                 case "generate_experimental_diagram":
-                    responseData = await fastapiClient.post('/generate_experimental_diagram', args);
+                    responseData = await this.apiClient.post('/generate_experimental_diagram', args);
                     return { content: [{ type: "text", text: responseData.data.diagram }] };
                 case "preview_diagram":
-                    responseData = await fastapiClient.post('/preview_diagram', args);
+                    responseData = await this.apiClient.post('/preview_diagram', args);
                     return { content: [{ type: "text", text: responseData.data.diagram }] };
                 case "preview_experimental_diagram":
-                    responseData = await fastapiClient.post('/preview_experimental_diagram', args);
+                    responseData = await this.apiClient.post('/preview_experimental_diagram', args);
                     return { content: [{ type: "text", text: responseData.data.diagram }] };
                 case "extract_concepts":
-                    responseData = await fastapiClient.post('/extract_concepts', args);
+                    responseData = await this.apiClient.post('/extract_concepts', args);
                     return { content: [{ type: "text", text: JSON.stringify(responseData.data.concepts) }] };
                 case "extract_original_text":
-                    responseData = await fastapiClient.post('/extract_original_text', args);
+                    responseData = await this.apiClient.post('/extract_original_text', args);
                     return { content: [{ type: "text", text: responseData.data.extracted_text }] };
                 case "check_duplicates":
-                    responseData = await fastapiClient.post('/check_duplicates', args);
+                    responseData = await this.apiClient.post('/check_duplicates', args);
                     return { content: [{ type: "text", text: JSON.stringify(responseData.data) }] };
                 case "handle_file_rename":
-                    responseData = await fastapiClient.post('/handle_file_rename', args);
+                    responseData = await this.apiClient.post('/handle_file_rename', args);
                     return { content: [{ type: "text", text: responseData.data.status }] };
                 case "handle_file_delete":
-                    responseData = await fastapiClient.post('/handle_file_delete', args);
+                    responseData = await this.apiClient.post('/handle_file_delete', args);
                     return { content: [{ type: "text", text: responseData.data.status }] };
                 case "batch_fix_mermaid":
-                    responseData = await fastapiClient.post('/batch_fix_mermaid', args);
+                    responseData = await this.apiClient.post('/batch_fix_mermaid', args);
                     return { content: [{ type: "text", text: JSON.stringify(responseData.data) }] };
                 default:
                     throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${tool_name}`);
             }
         } catch (error) {
-            console.error(`Error calling FastAPI endpoint for tool ${tool_name}:`, error.message);
+            if (error instanceof McpError) throw error;
             if (error.response) {
-                console.error("FastAPI Error Response:", error.response.data);
-                throw new McpError(ErrorCode.InternalError, `FastAPI error: ${error.response.data.detail || error.message}`);
+                console.error(`FastAPI tool ${tool_name} failed with HTTP ${error.response.status}`);
+                throw new McpError(ErrorCode.InternalError, `FastAPI request failed (HTTP ${error.response.status}).`);
             } else if (error.request) {
-                throw new McpError(ErrorCode.InternalError, `No response from FastAPI: ${error.message}`);
+                throw new McpError(ErrorCode.InternalError, 'No response from FastAPI.');
             } else {
-                throw new McpError(ErrorCode.InternalError, `Error setting up request: ${error.message}`);
+                throw new McpError(ErrorCode.InternalError, 'Unable to execute the FastAPI request.');
             }
         }
     }
@@ -362,13 +365,22 @@ async function main() {
 
         // Set environment variable for the Python process
         const env = { ...process.env };
+        env.NOTEMD_INSTANCE_ID = randomUUID();
         if (argv.config) {
             env.NOTEMD_CONFIG = argv.config;
         }
 
         // Start FastAPI server in the background
         const mainPyModule = 'main:app';
-        const fastapiProcess = spawn('python', ['-m', 'uvicorn', mainPyModule, '--host', '0.0.0.0', '--port', FASTAPI_PORT.toString()], { cwd: __dirname, stdio: 'inherit', env });
+        const fastapiProcess = spawnLoggedProcess('python', ['-m', 'uvicorn', mainPyModule, '--host', '127.0.0.1', '--port', FASTAPI_PORT.toString()], { cwd: __dirname, env });
+        process.once('exit', () => fastapiProcess.kill());
+        for (const signal of ['SIGINT', 'SIGTERM']) {
+            process.once(signal, () => { fastapiProcess.kill(); process.exit(0); });
+        }
+        fastapiProcess.on('error', () => {
+            console.error('Unable to start the Python backend.');
+            process.exit(1);
+        });
 
         fastapiProcess.on('close', (code) => {
             if (code !== 0) {
@@ -382,7 +394,8 @@ async function main() {
         const maxAttempts = 15; // Increased attempts
         while (!fastapiReady && attempts < maxAttempts) {
             try {
-                await fastapiClient.get('/health');
+                const health = await fastapiClient.get('/health');
+                if (health.data.instance_id !== env.NOTEMD_INSTANCE_ID) throw new Error('Backend instance mismatch');
                 fastapiReady = true;
                 console.error('FastAPI server is ready.');
             } catch (err) {
@@ -407,4 +420,6 @@ async function main() {
     }
 }
 
-main();
+if (process.argv[1] && pathToFileURL(realpathSync(process.argv[1])).href === import.meta.url) {
+    main();
+}

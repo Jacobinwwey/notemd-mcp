@@ -3,12 +3,17 @@
 import re
 import httpx
 import json
-import time
+import logging
+import math
 import os
 import asyncio
+import tempfile
 from typing import List, Dict, Any, Optional
 from urllib.parse import urlparse, parse_qs, quote
 from selectolax.parser import HTMLParser
+from markdown_processing import cleanup_latex_delimiters, ensure_mermaid_code_block, refine_mermaid_blocks, unwrap_markdown_response
+
+logger = logging.getLogger(__name__)
 
 # Placeholder for settings, will be imported from config.py
 SETTINGS = {}
@@ -18,12 +23,12 @@ def set_settings(settings_dict):
     SETTINGS = settings_dict
 
 # --- Utility Functions (from utils.ts) ---
-def cancellable_delay(ms: int, cancelled: bool) -> None:
+async def cancellable_delay(ms: int, cancelled: bool) -> None:
     if cancelled:
-        raise Exception("Processing cancelled")
-    time.sleep(ms / 1000.0)
+        raise asyncio.CancelledError("Processing cancelled")
+    await asyncio.sleep(ms / 1000.0)
     if cancelled:
-        raise Exception("Processing cancelled")
+        raise asyncio.CancelledError("Processing cancelled")
 
 def estimate_tokens(text: str) -> int:
     if not text: return 0
@@ -120,11 +125,11 @@ def strip_boxed_wrapper(content: str) -> str:
     return '\n'.join(lines)
 
 def apply_standard_post_processing(content: str, remove_markdown_fence: bool = False) -> str:
+    if remove_markdown_fence:
+        content = unwrap_markdown_response(content)
     processed = cleanup_latex_delimiters(content)
     processed = refine_mermaid_blocks(processed)
     processed = strip_boxed_wrapper(processed)
-    if remove_markdown_fence:
-        processed = processed.replace("```markdown", "")
     return processed.strip()
 
 def format_prompt(template: str, variables: Dict[str, str]) -> str:
@@ -165,8 +170,9 @@ async def execute_anthropic_api(provider_config: Dict[str, Any], model_name: str
         return data["content"][0]["text"]
 
 async def execute_google_api(provider_config: Dict[str, Any], model_name: str, prompt: str, content: str) -> str:
-    url = f"{provider_config['baseUrl']}/models/{model_name}:generateContent?key={provider_config['apiKey']}"
-    headers = {"Content-Type": "application/json"}
+    # Credentials belong in headers: URLs are logged by HTTP clients and proxies.
+    url = f"{provider_config['baseUrl']}/models/{model_name}:generateContent"
+    headers = {"Content-Type": "application/json", "x-goog-api-key": provider_config['apiKey']}
     payload = {"contents": [{"role": "user", "parts": [{"text": f"{prompt}\n\n{content}"}]}], "generationConfig": {"temperature": provider_config['temperature'], "maxOutputTokens": SETTINGS.get("MAX_TOKENS", 8192)}}
     async with httpx.AsyncClient() as client:
         response = await client.post(url, headers=headers, json=payload, timeout=60.0)
@@ -238,111 +244,47 @@ API_CALL_FUNCTIONS = {
 }
 
 async def call_api_with_retry(provider_config: Dict[str, Any], model_name: str, prompt: str, content: str, cancelled: bool) -> str:
-    last_error = None
-    max_attempts = SETTINGS.get("API_CALL_MAX_RETRIES", 3) + 1
+    retries = SETTINGS.get("API_CALL_MAX_RETRIES", 3)
     interval_seconds = SETTINGS.get("API_CALL_INTERVAL", 5)
-
-    for attempt in range(1, max_attempts + 1):
-        if cancelled: raise Exception("Processing cancelled by user before API attempt.")
+    if not isinstance(retries, int) or isinstance(retries, bool) or retries < 0:
+        raise ValueError("API_CALL_MAX_RETRIES must be a nonnegative integer")
+    if not isinstance(interval_seconds, (int, float)) or not math.isfinite(interval_seconds) or interval_seconds < 0:
+        raise ValueError("API_CALL_INTERVAL must be finite and nonnegative")
+    api_call_function = API_CALL_FUNCTIONS.get(provider_config["name"])
+    if not api_call_function:
+        raise ValueError(f"Unsupported provider: {provider_config['name']}")
+    for attempt in range(retries + 1):
+        if cancelled:
+            raise asyncio.CancelledError("Processing cancelled before API attempt")
         try:
-            api_call_function = API_CALL_FUNCTIONS.get(provider_config["name"])
-            if not api_call_function: raise ValueError(f"Unsupported provider: {provider_config['name']}")
-            return await api_call_function(provider_config, model_name, prompt, content)
-        except httpx.HTTPStatusError as e:
-            print(f"API Call: Attempt {attempt} failed with HTTP status {e.response.status_code}: {e.response.text}")
-            last_error = e
-            if e.response.status_code in [400, 401, 403, 404]:
-                raise e
-        except httpx.RequestError as e:
-            print(f"API Call: Attempt {attempt} failed with request error: {e}")
-            last_error = e
-        except Exception as e:
-            print(f"API Call: Attempt {attempt} failed with unexpected error: {e}")
-            last_error = e
-
-        if cancelled: raise Exception("Processing cancelled by user during API retry sequence.")
-
-        if attempt < max_attempts:
-            print(f"Waiting {interval_seconds} seconds before retry {attempt + 1}...")
-            cancellable_delay(interval_seconds * 1000, cancelled)
-
-    raise Exception(f"API call failed after {max_attempts} attempts. Last error: {last_error}")
+            response = await api_call_function(provider_config, model_name, prompt, content)
+            if cancelled:
+                raise asyncio.CancelledError("Processing cancelled after API response")
+            return response
+        except httpx.HTTPStatusError as error:
+            if error.response.status_code not in (408, 425, 429, 500, 502, 503, 504) or attempt == retries:
+                raise
+            logger.warning("Provider attempt %d failed with HTTP %d", attempt + 1, error.response.status_code)
+        except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError) as error:
+            if attempt == retries:
+                raise
+            logger.warning("Provider attempt %d failed with %s", attempt + 1, type(error).__name__)
+        # Task cancellation propagates through this await; configuration and parser
+        # failures are not transient and never cause repeated paid requests.
+        await cancellable_delay(interval_seconds * 1000, cancelled)
 
 async def call_llm_api(provider_config: Dict[str, Any], model_name: str, prompt: str, content: str, cancelled: bool = False) -> str:
+    if cancelled:
+        raise asyncio.CancelledError("Processing cancelled before API call")
     if SETTINGS.get("ENABLE_STABLE_API_CALL", False):
         return await call_api_with_retry(provider_config, model_name, prompt, content, cancelled)
-    else:
-        api_call_function = API_CALL_FUNCTIONS.get(provider_config["name"])
-        if not api_call_function: raise ValueError(f"Unsupported provider: {provider_config['name']}")
-        return await api_call_function(provider_config, model_name, prompt, content)
-
-# --- Mermaid and LaTeX Processing (from mermaidProcessor.ts) ---
-def refine_mermaid_blocks(content: str) -> str:
-    lines = content.split('\n')
-    result_lines = []
-    in_mermaid = False
-    current_block_lines = []
-    last_arrow_index_in_block = -1
-
-    for line in lines:
-        stripped = line.strip()
-        mermaid_start_regex = re.compile(r'^```\s*\(?\s*mermaid\s*\)?')
-
-        if mermaid_start_regex.search(stripped):
-            line = mermaid_start_regex.sub('```mermaid', line)
-            if in_mermaid:
-                if last_arrow_index_in_block != -1:
-                    if (last_arrow_index_in_block + 1 >= len(current_block_lines) or\
-                            current_block_lines[last_arrow_index_in_block + 1].strip() != '```'):
-                        current_block_lines.insert(last_arrow_index_in_block + 1, '```')
-                elif current_block_lines:
-                    if current_block_lines[0].strip().startswith('```mermaid') and \
-                       current_block_lines[-1].strip() != '```':
-                        if len(current_block_lines) == 1 or current_block_lines[1].strip() != '```':
-                            current_block_lines.insert(1, '```')
-            result_lines.extend(current_block_lines)
-            in_mermaid = True
-            current_block_lines = [line]
-            last_arrow_index_in_block = -1
-        elif in_mermaid:
-            if "subgraph" not in line:
-                line = line.replace('"', '')
-
-            current_block_lines.append(line)
-            if "-->" in line:
-                last_arrow_index_in_block = len(current_block_lines) - 1
-            if stripped == '```':
-                result_lines.extend(current_block_lines)
-                in_mermaid = False
-                current_block_lines = []
-                last_arrow_index_in_block = -1
-        else:
-            result_lines.append(line)
-
-    if in_mermaid:
-        if last_arrow_index_in_block != -1:
-            if (last_arrow_index_in_block + 1 >= len(current_block_lines) or\
-                    current_block_lines[last_arrow_index_in_block + 1].strip() != '```'):
-                current_block_lines.insert(last_arrow_index_in_block + 1, '```')
-        elif current_block_lines:
-            if current_block_lines[0].strip().startswith('```mermaid') and \
-               current_block_lines[-1].strip() != '```':
-                if len(current_block_lines) == 1 or current_block_lines[1].strip() != '```':
-                    current_block_lines.insert(1, '```')
-                elif current_block_lines[-1].strip() != '```':
-                    current_block_lines.append('```')
-        elif current_block_lines[-1].strip() != '```':
-            current_block_lines.append('```')
-        result_lines.extend(current_block_lines)
-
-    return '\n'.join(result_lines)
-
-def cleanup_latex_delimiters(content: str) -> str:
-    processed = content
-    processed = re.sub(r'\\\$', '___TEMP_DOLLAR_ESCAPE___', processed)
-    processed = re.sub(r'\$\s*([^$]*?)\s*\$', lambda m: m.group(0) if m.group(0).startswith('$$') and m.group(0).endswith('$$') else f"${m.group(1).strip()}$", processed)
-    processed = re.sub(r'___TEMP_DOLLAR_ESCAPE___', '$', processed)
-    return processed
+    api_call_function = API_CALL_FUNCTIONS.get(provider_config["name"])
+    if not api_call_function:
+        raise ValueError(f"Unsupported provider: {provider_config['name']}")
+    response = await api_call_function(provider_config, model_name, prompt, content)
+    if cancelled:
+        raise asyncio.CancelledError("Processing cancelled after API response")
+    return response
 
 # --- Duplicate Handling (from fileUtils.ts) ---
 def find_duplicates(content: str) -> set[str]:
@@ -365,7 +307,7 @@ def get_duplicate_words(content: str) -> List[str]:
 
 async def handle_duplicates(content: str):
     if not SETTINGS.get("ENABLE_DUPLICATE_DETECTION", True):
-        print("Duplicate detection is disabled in settings.")
+        logger.info("Duplicate detection is disabled in settings.")
         return
     potential_issues = set()
     duplicate_words = find_duplicates(content)
@@ -373,9 +315,9 @@ async def handle_duplicates(content: str):
         potential_issues.add(f'Duplicate word: "{word}"')
 
     if potential_issues:
-        print(f"Found {len(potential_issues)} potential duplicate/consistency issues in processed content.")
+        logger.info(f"Found {len(potential_issues)} potential duplicate/consistency issues in processed content.")
         for issue in potential_issues:
-            print(issue)
+            logger.info(issue)
 
 # --- Search Functions (from searchUtils.ts) ---
 async def search_duckduckgo(query: str) -> List[Dict[str, str]]:
@@ -384,7 +326,7 @@ async def search_duckduckgo(query: str) -> List[Dict[str, str]]:
     url = f"https://html.duckduckgo.com/html/?q={encoded_query}"
     results = []
 
-    print(f"Querying DuckDuckGo HTML endpoint: {url}")
+    logger.info(f"Querying DuckDuckGo HTML endpoint: {url}")
     try:
         async with httpx.AsyncClient(timeout=SETTINGS.get("DDG_FETCH_TIMEOUT", 15)) as client:
             response = await client.get(url, headers={
@@ -395,7 +337,7 @@ async def search_duckduckgo(query: str) -> List[Dict[str, str]]:
             response.raise_for_status()
 
         html_content = response.text
-        print(f"Received HTML response from DuckDuckGo ({len(html_content)} bytes). Parsing...")
+        logger.info(f"Received HTML response from DuckDuckGo ({len(html_content)} bytes). Parsing...")
 
         parser = HTMLParser(html_content)
         candidate_nodes = parser.css('.result--html') or parser.css('.result__body') or parser.css('.result')
@@ -419,14 +361,14 @@ async def search_duckduckgo(query: str) -> List[Dict[str, str]]:
                     if decoded_link:
                         link = decoded_link
                     else:
-                        print(f"Warning: Could not decode DDG redirect URL: {link}")
+                        logger.info(f"Warning: Could not decode DDG redirect URL: {link}")
                         link = f"https://duckduckgo.com{link}"
                 elif not link.startswith('http'):
                     link = f"https://duckduckgo.com{link}"
 
                 results.append({"title": title, "url": link, "content": snippet or title})
             else:
-                print(f"Warning: Skipping partially parsed result (Title: {bool(title)}, Link: {bool(link)})")
+                logger.info(f"Warning: Skipping partially parsed result (Title: {bool(title)}, Link: {bool(link)})")
 
         # Fallback: extract direct anchors when container selectors change.
         if not results:
@@ -446,17 +388,17 @@ async def search_duckduckgo(query: str) -> List[Dict[str, str]]:
                 results.append({"title": title, "url": link, "content": title})
 
         if not results:
-            print("Warning: Could not parse any valid results from DuckDuckGo HTML.")
+            logger.info("Warning: Could not parse any valid results from DuckDuckGo HTML.")
         else:
-            print(f"Successfully parsed {len(results)} results from DuckDuckGo.")
+            logger.info(f"Successfully parsed {len(results)} results from DuckDuckGo.")
         return results
 
     except Exception as e:
-        print(f"Automated DuckDuckGo search failed. Error: {e}. Consider using Tavily.")
+        logger.info(f"Automated DuckDuckGo search failed. Error: {e}. Consider using Tavily.")
         return []
 
 async def fetch_content_from_url(url: str) -> str:
-    print(f"Fetching content from: {url}")
+    logger.info(f"Fetching content from: {url}")
     try:
         async with httpx.AsyncClient(timeout=SETTINGS.get("DDG_FETCH_TIMEOUT", 15)) as client:
             response = await client.get(url, headers={
@@ -467,7 +409,7 @@ async def fetch_content_from_url(url: str) -> str:
 
         content_type = response.headers.get('content-type', '')
         if 'text/html' not in content_type:
-            print(f"Skipping non-HTML content ({content_type}) from: {url}")
+            logger.info(f"Skipping non-HTML content ({content_type}) from: {url}")
             return f"[Content skipped: Not HTML - {content_type}]"
 
         parser = HTMLParser(response.text)
@@ -482,17 +424,17 @@ async def fetch_content_from_url(url: str) -> str:
         max_length = 15000
         if len(text) > max_length:
             text = text[:max_length] + "... [content truncated]"
-            print(f"Truncated content from: {url}")
+            logger.info(f"Truncated content from: {url}")
 
-        print(f"Successfully fetched and extracted text from: {url}")
+        logger.info(f"Successfully fetched and extracted text from: {url}")
         return text
 
     except Exception as e:
-        print(f"Error fetching content from {url}: {e}")
+        logger.info(f"Error fetching content from {url}: {e}")
         return f"[Content skipped: Error fetching - {e}]"
 
 async def _perform_research(topic: str, cancelled: bool) -> Optional[str]:
-    print(f'Entering _perform_research for topic: "{topic}"')
+    logger.info(f'Entering _perform_research for topic: "{topic}"')
     search_query = f"{topic} wiki"
     combined_content = ''
     search_source = ''
@@ -501,12 +443,12 @@ async def _perform_research(topic: str, cancelled: bool) -> Optional[str]:
     try:
         if SETTINGS.get("SEARCH_PROVIDER", "tavily") == "tavily":
             search_source = 'Tavily'
-            print("Selected search provider: Tavily.")
+            logger.info("Selected search provider: Tavily.")
             if not SETTINGS.get("TAVILY_API_KEY"): raise ValueError('Tavily API key is not configured.')
             if cancelled: raise Exception("Processing cancelled by user before Tavily search.")
 
             tavily_url = 'https://api.tavily.com/search'
-            print(f'Searching Tavily for: "{search_query}"')
+            logger.info(f'Searching Tavily for: "{search_query}"')
             
             tavily_request_body = {
                 "api_key": SETTINGS["TAVILY_API_KEY"],
@@ -524,37 +466,37 @@ async def _perform_research(topic: str, cancelled: bool) -> Optional[str]:
             if cancelled: raise Exception("Processing cancelled by user during Tavily search.")
             tavily_data = response.json()
             if not tavily_data.get("results"): 
-                print('Tavily returned no results.')
+                logger.info('Tavily returned no results.')
                 return None
             search_results = tavily_data["results"]
-            print(f"Fetched {len(search_results)} results from Tavily.")
+            logger.info(f"Fetched {len(search_results)} results from Tavily.")
 
         else:
             search_source = 'DuckDuckGo'
-            print("Selected search provider: DuckDuckGo.")
+            logger.info("Selected search provider: DuckDuckGo.")
             if cancelled: raise Exception("Processing cancelled by user before DuckDuckGo search.")
-            print(f'Searching DuckDuckGo for: "{search_query}"')
+            logger.info(f'Searching DuckDuckGo for: "{search_query}"')
             search_results = await search_duckduckgo(search_query)
             if cancelled: raise Exception("Processing cancelled by user during DuckDuckGo search.")
             if not search_results: 
-                print('DuckDuckGo search failed or returned no results.')
+                logger.info('DuckDuckGo search failed or returned no results.')
                 return None
         
         fetched_contents = []
         if search_source == 'DuckDuckGo':
-            print(f"Fetching content for top {len(search_results)} DuckDuckGo results...")
+            logger.info(f"Fetching content for top {len(search_results)} DuckDuckGo results...")
             fetch_promises = [fetch_content_from_url(result["url"]) for result in search_results]
             fetched_contents = await asyncio.gather(*fetch_promises)
             if cancelled: raise Exception("Processing cancelled by user during DuckDuckGo content fetching.")
-            print(f"Finished fetching content for DuckDuckGo results.")
+            logger.info(f"Finished fetching content for DuckDuckGo results.")
         else:
-            print("Using snippets directly from Tavily results.")
+            logger.info("Using snippets directly from Tavily results.")
             fetched_contents = [result["content"] for result in search_results]
 
         if cancelled: raise Exception("Processing cancelled by user before combining content.")
 
         if fetched_contents:
-            print(f"Combining {len(fetched_contents)} fetched/snippet contents.")
+            logger.info(f"Combining {len(fetched_contents)} fetched/snippet contents.")
             combined_content = f'Research context for "{search_query}" (via {search_source}):\n\n'
             for i, result in enumerate(search_results):
                 combined_content += f"Result {i + 1}:\n"
@@ -564,18 +506,18 @@ async def _perform_research(topic: str, cancelled: bool) -> Optional[str]:
 
             estimated_tokens_count = estimate_tokens(combined_content)
             max_tokens = SETTINGS.get("MAX_RESEARCH_CONTENT_TOKENS", 3000)
-            print(f"Estimated research context tokens: {estimated_tokens_count}. Limit: {max_tokens}")
+            logger.info(f"Estimated research context tokens: {estimated_tokens_count}. Limit: {max_tokens}")
             if estimated_tokens_count > max_tokens:
                 max_chars = max_tokens * 4
                 combined_content = combined_content[:max_chars] + "\n\n[...research context truncated due to token limit]"
-                print(f"Truncated research context to ~{max_tokens} tokens.")
+                logger.info(f"Truncated research context to ~{max_tokens} tokens.")
             return combined_content.strip()
         else:
-            print('No content could be obtained from search results.')
+            logger.info('No content could be obtained from search results.')
             return None
 
     except Exception as e:
-        print(f'Error in _perform_research catch block for "{topic}": {e}')
+        logger.info(f'Error in _perform_research catch block for "{topic}": {e}')
         return None
 
 # --- Main Processing Function ---
@@ -590,7 +532,7 @@ async def process_content(content: str, cancelled: bool = False) -> str:
 
     for chunk in chunks:
         llm_response = await call_llm_api(provider_config, model_name, get_llm_processing_prompt(), chunk, cancelled)
-        processed_chunks.append(llm_response)
+        processed_chunks.append(unwrap_markdown_response(llm_response))
 
     processed_content = "\n\n".join(processed_chunks).replace("\n\n\n", "\n\n").strip()
 
@@ -604,18 +546,15 @@ async def process_content(content: str, cancelled: bool = False) -> str:
             lines.pop()
         final_content = '\n'.join(lines)
 
-    if SETTINGS.get("REMOVE_CODE_FENCES_ON_ADD_LINKS", False):
-        final_content = final_content.replace("```markdown", "")
-        final_content = final_content.replace("```", "")
-    else:
-        final_content = final_content.replace("```markdown", "")
+    # Provider envelopes have already been removed per chunk. Inner code fences
+    # belong to the document, including when the legacy removal setting is enabled.
 
     await handle_duplicates(final_content)
 
     return final_content
 
 async def generate_content_for_title(title: str, cancelled: bool = False) -> str:
-    print(f"Starting content generation for: {title}")
+    logger.info(f"Starting content generation for: {title}")
     provider_config = get_provider_for_task("generateTitle")
     if not provider_config: raise ValueError("No valid LLM provider configured for \"Generate from Title\" task.")
     model_name = get_model_for_task("generateTitle", provider_config)
@@ -623,20 +562,20 @@ async def generate_content_for_title(title: str, cancelled: bool = False) -> str
     research_context = ''
     if SETTINGS.get("ENABLE_RESEARCH_IN_GENERATE_CONTENT", False):
         if cancelled: raise Exception("Processing cancelled by user before research.")
-        print(f'Research enabled for "{title}". Performing web search...')
+        logger.info(f'Research enabled for "{title}". Performing web search...')
         try:
             context = await _perform_research(title, cancelled)
             if cancelled: raise Exception("Processing cancelled by user during research.")
             if context:
                 research_context = context
-                print(f'Research context obtained for "{title}".')
+                logger.info(f'Research context obtained for "{title}".')
             else:
-                print(f'Warning: Research for "{title}" returned no results or failed.')
+                logger.info(f'Warning: Research for "{title}" returned no results or failed.')
         except Exception as e:
             if "cancelled by user" in str(e): raise e
-            print(f'Error during research for "{title}": {e}. Proceeding without web context.')
+            logger.info(f'Error during research for "{title}": {e}. Proceeding without web context.')
     else:
-        print("Research disabled for \"Generate from Title\".")
+        logger.info("Research disabled for \"Generate from Title\".")
     if cancelled: raise Exception("Processing cancelled by user before generation prompt construction.")
 
     research_context_section = f"\n\nUse the following research context to inform the documentation:\n\n{research_context}\n\n" if research_context else ""
@@ -657,17 +596,17 @@ async def generate_content_for_title(title: str, cancelled: bool = False) -> str
         generation_prompt += f'\n\nIMPORTANT: Process the request and perform all reasoning in English. However, the final output MUST be written in {target_language_name}.In mermaid diagrams, it is necessary to translate into {target_language_name} while retaining the English.'
 
     if cancelled: raise Exception("Processing cancelled by user before API call.")
-    print(f"Calling {provider_config['name']} to generate content...")
+    logger.info(f"Calling {provider_config['name']} to generate content...")
 
     generated_content = await call_llm_api(provider_config, model_name, generation_prompt, "", cancelled)
 
     if cancelled: raise Exception("Processing cancelled by user after API call.")
-    print(f"Content received from {provider_config['name']}.")
+    logger.info(f"Content received from {provider_config['name']}.")
 
     final_content = cleanup_latex_delimiters(generated_content)
     if cancelled: raise Exception("Processing cancelled by user during post-processing.")
     final_content = refine_mermaid_blocks(final_content)
-    print("Mermaid/LaTeX cleanup applied.")
+    logger.info("Mermaid/LaTeX cleanup applied.")
 
     if cancelled: raise Exception("Processing cancelled by user after post-processing.")
 
@@ -683,7 +622,7 @@ async def generate_content_for_title(title: str, cancelled: bool = False) -> str
     return final_content
 
 async def research_and_summarize(topic: str, cancelled: bool = False) -> str:
-    print(f'Starting research for topic: "{topic}"')
+    logger.info(f'Starting research for topic: "{topic}"')
 
     if cancelled: raise Exception("Processing cancelled by user before research.")
     research_context = await _perform_research(topic, cancelled)
@@ -692,12 +631,12 @@ async def research_and_summarize(topic: str, cancelled: bool = False) -> str:
 
     if not research_context:
         raise ValueError(f'Research for "{topic}" failed or returned no results. Summary not generated.')
-    print(f'_perform_research returned context for "{topic}" (length: {len(research_context)}).')
+    logger.info(f'_perform_research returned context for "{topic}" (length: {len(research_context)}).')
 
     provider_config = get_provider_for_task("research")
     if not provider_config: raise ValueError("No valid LLM provider configured for the \"Research & Summarize\" task.")
     model_name = get_model_for_task("research", provider_config)
-    print(f'Using provider "{provider_config["name"]}" and model "{model_name}" for summarization.')
+    logger.info(f'Using provider "{provider_config["name"]}" and model "{model_name}" for summarization.')
 
     if cancelled: raise Exception("Processing cancelled by user before summarization.")
 
@@ -714,12 +653,12 @@ async def research_and_summarize(topic: str, cancelled: bool = False) -> str:
 
     if cancelled: raise Exception("Processing cancelled by user after summarization.")
 
-    print(f"Generated summary using {provider_config['name']}.")
+    logger.info(f"Generated summary using {provider_config['name']}.")
 
     final_summary = cleanup_latex_delimiters(summary)
     if cancelled: raise Exception("Processing cancelled by user during post-processing.")
     final_summary = refine_mermaid_blocks(final_summary)
-    print("Mermaid/LaTeX cleanup applied to summary.")
+    logger.info("Mermaid/LaTeX cleanup applied to summary.")
 
     if cancelled: raise Exception("Processing cancelled by user after post-processing.")
 
@@ -739,7 +678,7 @@ async def research_and_summarize(topic: str, cancelled: bool = False) -> str:
     return summary_header + summary_to_append
 
 async def execute_custom_prompt(prompt: str, content: str, cancelled: bool = False) -> str:
-    print(f"Executing custom prompt...")
+    logger.info(f"Executing custom prompt...")
     provider_config = get_provider_for_task("addLinks") # Use default provider for custom tasks
     if not provider_config:
         raise ValueError(f"Active provider not found in settings.")
@@ -748,16 +687,6 @@ async def execute_custom_prompt(prompt: str, content: str, cancelled: bool = Fal
     llm_response = await call_llm_api(provider_config, model_name, prompt, content, cancelled)
 
     return llm_response
-
-def ensure_mermaid_code_block(content: str, fallback_header: str = "mindmap") -> str:
-    stripped = content.strip()
-    if "```mermaid" in stripped:
-        return stripped
-    if not stripped:
-        return "```mermaid\nmindmap\n    Empty\n```"
-    if stripped.startswith("graph ") or stripped.startswith("mindmap") or stripped.startswith("flowchart"):
-        return f"```mermaid\n{stripped}\n```"
-    return f"```mermaid\n{fallback_header}\n    {stripped}\n```"
 
 async def translate_content(content: str, target_language: str = "en", cancelled: bool = False) -> str:
     if not content.strip():
@@ -924,7 +853,7 @@ async def handle_file_rename(old_path: str, new_path: str):
     if not old_name or not new_name or old_name == new_name:
         return
 
-    print(f"Updating links for renamed file: {new_name}")
+    logger.info(f"Updating links for renamed file: {new_name}")
 
     link_regex = re.compile(r'\[\[{}\]\]'.format(re.escape(old_name)))
     updated_count = 0
@@ -946,19 +875,19 @@ async def handle_file_rename(old_path: str, new_path: str):
                             updated_count += 1
                 except Exception as e:
                     error_msg = f"Error updating links in {file_path} for rename: {e}"
-                    print(error_msg)
+                    logger.info(error_msg)
                     errors.append(error_msg)
     
-    print(f"Updated links to \"{new_name}\" in {updated_count} files.")
+    logger.info(f"Updated links to \"{new_name}\" in {updated_count} files.")
     if errors:
-        print(f"Encountered {len(errors)} errors while updating links.")
+        logger.info(f"Encountered {len(errors)} errors while updating links.")
 
 async def handle_file_delete(path: str):
     file_name = os.path.splitext(os.path.basename(path))[0]
     if not file_name:
         return
 
-    print(f"Removing links for deleted file: {file_name}")
+    logger.info(f"Removing links for deleted file: {file_name}")
 
     link_regex = re.compile(r'\[\[{}\]\]'.format(re.escape(file_name)), re.IGNORECASE)
     updated_count = 0
@@ -982,12 +911,12 @@ async def handle_file_delete(path: str):
                         updated_count += 1
                 except Exception as e:
                     error_msg = f"Error removing links from {file_path} for delete: {e}"
-                    print(error_msg)
+                    logger.info(error_msg)
                     errors.append(error_msg)
 
-    print(f"Removed links to \"{file_name}\" from {updated_count} files.")
+    logger.info(f"Removed links to \"{file_name}\" from {updated_count} files.")
     if errors:
-        print(f"Encountered {len(errors)} errors while removing links.")
+        logger.info(f"Encountered {len(errors)} errors while removing links.")
 
 async def batch_fix_mermaid_syntax_in_folder(folder_path: str):
     if not os.path.isdir(folder_path):
@@ -1001,20 +930,44 @@ async def batch_fix_mermaid_syntax_in_folder(folder_path: str):
             if file.endswith(".md"):
                 file_path = os.path.join(root, file)
                 try:
-                    with open(file_path, 'r', encoding='utf-8') as f:
+                    if os.path.islink(file_path):
+                        raise ValueError("Symbolic links are not processed")
+                    with open(file_path, 'r', encoding='utf-8', newline='') as f:
                         original_content = f.read()
                     
                     processed_content = cleanup_latex_delimiters(original_content)
                     processed_content = refine_mermaid_blocks(processed_content)
 
-                    if processed_content.strip() != original_content.strip():
-                        with open(file_path, 'w', encoding='utf-8') as f:
-                            f.write(processed_content)
+                    if processed_content != original_content:
+                        write_changed_markdown(file_path, original_content, processed_content)
                         modified_count += 1
-                        print(f"Fixed syntax in: {file_path}")
+                        logger.info(f"Fixed syntax in: {file_path}")
                 except Exception as e:
                     error_msg = f"Error fixing syntax in {file_path}: {e}"
-                    print(error_msg)
+                    logger.info(error_msg)
                     errors.append({"file": file_path, "message": str(e)})
     
     return {"errors": errors, "modified_count": modified_count}
+
+
+def write_changed_markdown(file_path: str, original: str, updated: str) -> None:
+    """Stage complete output beside the source, then replace it after a fresh-read check."""
+    source_mode = os.stat(file_path).st_mode
+    if not source_mode & 0o222:
+        raise PermissionError("Source is read-only; syntax repair was not written")
+    candidate = None
+    try:
+        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', newline='', dir=os.path.dirname(file_path), prefix='.notemd-', suffix='.tmp', delete=False) as output:
+            candidate = output.name
+            output.write(updated)
+            output.flush()
+            os.fsync(output.fileno())
+        os.chmod(candidate, source_mode)
+        with open(file_path, 'r', encoding='utf-8', newline='') as source:
+            if source.read() != original:
+                raise ValueError("Source changed during syntax repair")
+        os.replace(candidate, file_path)
+        candidate = None
+    finally:
+        if candidate is not None:
+            os.unlink(candidate)
